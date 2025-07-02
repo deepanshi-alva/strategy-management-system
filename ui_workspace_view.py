@@ -370,7 +370,7 @@ def handle_add_row(user_id, workspace_id, table_name, refresh_callback):
     select_instrument(after_instrument_selected)
 
 # Main layout for workspace
-def open_workspace_layout(workspace_id, email):
+def open_workspace_layout(workspace_id, email, master_win=None):
     user_id = db_handler.get_user_id(email)
     workspace = db_handler.get_workspace_by_id(workspace_id)
     entry_widgets_by_row_id = {}
@@ -379,7 +379,7 @@ def open_workspace_layout(workspace_id, email):
     bg_color = "#ffffff" if theme == "light" else "#111111"
     fg_color = "black" if theme == "light" else "white"
 
-    win = tk.Tk()
+    win = tk.Toplevel(master=master_win)
     win.title(name)
     # win.attributes("-fullscreen", True)
     win.configure(bg=bg_color)
@@ -461,7 +461,6 @@ def open_workspace_layout(workspace_id, email):
                 widgets["delete_btn"].config(state="normal")
             if "stop_btn" in widgets:
                 widgets["stop_btn"].config(state="disabled")
-
 
     def handle_start_all():
         table_name = table_var.get()
@@ -607,7 +606,6 @@ def open_workspace_layout(workspace_id, email):
                     update_strategy_status_display()
 
             threading.Thread(target=lambda: send_tcp_command(command, callback=callback)).start()
-
 
     def set_default_table(table_name):
         conn = db_handler.sqlite3.connect("users.db")
@@ -964,8 +962,6 @@ def open_workspace_layout(workspace_id, email):
 
         # print(f"🟢 Updating strategy status: {active} / {total}")
 
-
-
     def refresh_tables(select_table_name=None):
         conn = db_handler.sqlite3.connect("users.db")
         cur = conn.cursor()
@@ -1035,10 +1031,11 @@ def open_workspace_layout(workspace_id, email):
             btn = tk.Button(action_btns, text=act)
         btn.pack(side="left", padx=5)
 
-
     def back():
-        win.destroy()
-        ui_workspace.workspace_window(email)
+        # win.destroy()
+        master_win.lift()
+        master_win.focus_force()
+        # ui_workspace.workspace_window(email)
     
     # Add "Back to Workspaces" after "Stop All"
     back_btn = tk.Button(action_btns, text="Back to Workspaces", command=lambda: back(),
@@ -1053,7 +1050,7 @@ def open_workspace_layout(workspace_id, email):
                         bg=bg_color, fg="green", anchor="w", justify="left")
     status_label.pack(side="left")
 
-
     refresh_tables()
 
     win.mainloop()
+    return win

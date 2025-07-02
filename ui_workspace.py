@@ -4,6 +4,8 @@ import db_handler
 import ui_login
 from ui_workspace_view import open_workspace_layout
 
+open_workspace_windows = {}
+
 # Common emoji options
 EMOJIS = ["📁", "📊", "🧾", "📈", "🗂️", "💼", "📋", "🧮", "📜", "🧠"]
 
@@ -26,8 +28,20 @@ def workspace_window(email):
         refresh_workspaces()
 
     def open_workspace(workspace_id):
-        win.destroy()
-        open_workspace_layout(workspace_id, email)
+        if workspace_id in open_workspace_windows:
+            window = open_workspace_windows[workspace_id]
+            try:
+                # Try to bring the window to front
+                window.lift()
+                window.focus_force()
+            except tk.TclError:
+                # If window was closed without removing from dict, re-open
+                del open_workspace_windows[workspace_id]
+                new_win = open_workspace_layout(workspace_id, email, master_win=win)
+                open_workspace_windows[workspace_id] = new_win
+        else:
+            new_win = open_workspace_layout(workspace_id, email, master_win=win)
+            open_workspace_windows[workspace_id] = new_win
 
     def refresh_workspaces():
         for widget in workspace_frame.winfo_children():
