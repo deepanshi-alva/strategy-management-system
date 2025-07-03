@@ -2,6 +2,8 @@ from db_handler import init_db
 import ui_login
 import sqlite3
 import config  # import the module, not just the variable
+import sys
+import os
 
 def resource_path(relative_path):
     """Get absolute path to resource (for PyInstaller compatibility)"""
