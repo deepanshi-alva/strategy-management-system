@@ -319,15 +319,23 @@ def handle_add_row(user_id, workspace_id, table_name, refresh_callback):
         schema = json.loads(result[0])
         physical_table = result[1]
 
-        # --- THE CRITICAL CHANGE FOR ID GENERATION STARTS HERE ---
-        # Find the maximum existing ID in the table and increment it.
-        # CAST(ID AS INTEGER) is used to ensure numerical comparison, as IDs are stored as text.
-        cur.execute(f"SELECT MAX(CAST(ID AS INTEGER)) FROM {physical_table}")
-        max_id_result = cur.fetchone()[0]
+        # === GLOBAL USER-WIDE ID GENERATION ===
+        cur.execute("SELECT physical_table_name FROM user_tables WHERE user_id=?", (user_id,))
+        user_tables = cur.fetchall()
 
-        # If the table is empty (max_id_result is None), start ID from 1.
-        # Otherwise, increment the highest existing ID by 1.
-        next_id = (max_id_result if max_id_result is not None else 0) + 1
+        max_id = 0
+        for (table,) in user_tables:
+            try:
+                cur.execute(f"SELECT MAX(CAST(ID AS INTEGER)) FROM {table}")
+                result = cur.fetchone()[0]
+                if result is not None and int(result) > max_id:
+                    max_id = int(result)
+            except db_handler.sqlite3.Error:
+                continue  # Skip tables that might not exist or cause errors
+
+        next_id = max_id + 1
+        print("The next global user-based ID is:", next_id)
+
 
         print("The next unique ID for the new row is:", next_id) # For debugging/verification
         # --- END OF CRITICAL CHANGE FOR ID GENERATION ---
@@ -387,13 +395,13 @@ def open_workspace_layout(workspace_id, email, master_win=None):
     # === HEADER ===
     header = tk.Frame(win, bg=bg_color)
     header.pack(fill="x", padx=20, pady=10)
-    tk.Label(header, text=f"{icon} {name}", font=("Arial", 24, "bold"), bg=bg_color, fg=fg_color).pack(side="left")
+    tk.Label(header, text=f"Workspace: {icon} {name}", font=("Arial", 24, "bold"), bg=bg_color, fg=fg_color).pack(side="left")
 
     table_frame = tk.Frame(win, bg=bg_color)
     table_frame.pack(fill="x", padx=20, pady=5)
 
     # Dropdown for tables
-    tk.Label(table_frame, text="Table:", bg=bg_color, fg=fg_color).pack(side="left")
+    tk.Label(table_frame, text="PF Group:", bg=bg_color, fg=fg_color).pack(side="left")
     table_var = tk.StringVar()
     table_dropdown = ttk.Combobox(table_frame, textvariable=table_var)
     table_dropdown.pack(side="left", padx=5)
