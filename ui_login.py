@@ -4,6 +4,16 @@ from db_handler import verify_user
 import ui_signup
 import ui_workspace
 import db_handler
+import sqlite3
+
+def initialize_user_session_counter(user_id):
+    conn = sqlite3.connect("users.db")
+    cur = conn.cursor()
+    # Reset counter to 0 for new session
+    cur.execute("REPLACE INTO user_session_counters (user_id, current_id) VALUES (?, ?)", (user_id, 0))
+    conn.commit()
+    conn.close()
+
 
 def login_window():
     win = tk.Tk()
@@ -46,6 +56,7 @@ def login_window():
             messagebox.showinfo("Success", "Login Successful!")
             win.destroy()
             user_id = db_handler.get_user_id(email)
+            initialize_user_session_counter(user_id)
             default_workspace_id = db_handler.get_default_workspace_id(user_id)
             if default_workspace_id:
                 from ui_workspace_view import open_workspace_layout

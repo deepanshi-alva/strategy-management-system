@@ -51,6 +51,14 @@ def init_db():
             FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
         )
     """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_session_counters (
+            user_id INTEGER PRIMARY KEY,
+            current_id INTEGER
+        );
+    """)
+
     conn.commit()
     conn.close()
 
@@ -76,7 +84,6 @@ def verify_user(email, password):
     result = c.fetchone()
     conn.close()
     return result is not None
-
 
 def get_user_id(email):
     conn = sqlite3.connect("users.db")

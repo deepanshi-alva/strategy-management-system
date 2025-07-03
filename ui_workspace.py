@@ -21,6 +21,11 @@ def workspace_window(email):
 
     def logout():
         win.destroy()
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+        cur.execute("DELETE FROM user_session_counters WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
         ui_login.login_window()
 
     def set_default(workspace_id):

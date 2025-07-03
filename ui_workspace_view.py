@@ -7,7 +7,23 @@ from instrument_pop import select_instrument
 from functools import partial
 from tcp_utils import send_tcp_command
 import threading
-import config
+
+def get_next_session_id(user_id):
+    conn = db_handler.sqlite3.connect("users.db")
+    cur = conn.cursor()
+
+    # Get current counter
+    cur.execute("SELECT current_id FROM user_session_counters WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+    current_id = row[0] if row else 0
+    next_id = current_id + 1
+
+    # Update counter
+    cur.execute("REPLACE INTO user_session_counters (user_id, current_id) VALUES (?, ?)", (user_id, next_id))
+    conn.commit()
+    conn.close()
+
+    return next_id
 
 # Constants
 TABLE_ACTIONS = ["Set Default", "New Table", "Edit Table", "Add Row", "Start All", "Stop All"]
@@ -320,21 +336,7 @@ def handle_add_row(user_id, workspace_id, table_name, refresh_callback):
         schema = json.loads(result[0])
         physical_table = result[1]
 
-        # === GLOBAL USER-WIDE ID GENERATION ===
-        cur.execute("SELECT physical_table_name FROM user_tables WHERE user_id=?", (user_id,))
-        user_tables = cur.fetchall()
-
-        max_id = 0
-        for (table,) in user_tables:
-            try:
-                cur.execute(f"SELECT MAX(CAST(ID AS INTEGER)) FROM {table}")
-                result = cur.fetchone()[0]
-                if result is not None and int(result) > max_id:
-                    max_id = int(result)
-            except db_handler.sqlite3.Error:
-                continue  # Skip tables that might not exist or cause errors
-
-        next_id = max_id + 1
+        next_id = get_next_session_id(user_id)
         print("The next global user-based ID is:", next_id)
 
 
