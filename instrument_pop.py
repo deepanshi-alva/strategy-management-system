@@ -2,14 +2,14 @@
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-import instrument_cache  # access the shared list
+import config  # access the shared list
 
 instrument_popup = None
 
 def select_instrument(callback):
     global instrument_popup
 
-    instruments = instrument_cache.cached_instruments
+    instruments = config.cached_instruments
 
     # Group instruments by symbol
     symbol_to_instruments = {}

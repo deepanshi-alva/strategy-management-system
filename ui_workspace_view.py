@@ -7,6 +7,7 @@ from instrument_pop import select_instrument
 from functools import partial
 from tcp_utils import send_tcp_command
 import threading
+import config
 
 # Constants
 TABLE_ACTIONS = ["Set Default", "New Table", "Edit Table", "Add Row", "Start All", "Stop All"]
