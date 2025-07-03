@@ -60,7 +60,11 @@ def select_instrument(callback):
                 instrument_popup.symbol_dropdown['values'] = ["-- Select a Symbol --"] + instrument_popup.all_symbols
                 return
 
-            matches = [s for s in instrument_popup.all_symbols if typed.lower() in s.lower()]
+            # Prioritize prefix matches
+            typed_lower = typed.lower()
+            starts_with = [s for s in instrument_popup.all_symbols if s.lower().startswith(typed_lower)]
+            contains = [s for s in instrument_popup.all_symbols if typed_lower in s.lower() and not s.lower().startswith(typed_lower)]
+            matches = starts_with + contains
 
             if matches:
                 instrument_popup.symbol_dropdown['values'] = matches
@@ -105,7 +109,11 @@ def select_instrument(callback):
                 instrument_popup.name_dropdown['values'] = ["-- Select an Instrument --"] + instrument_popup.all_names
                 return
 
-            matches = [n for n in instrument_popup.all_names if typed.lower() in n.lower()]
+            # Prioritize prefix matches
+            typed_lower = typed.lower()
+            starts_with = [n for n in instrument_popup.all_names if n.lower().startswith(typed_lower)]
+            contains = [n for n in instrument_popup.all_names if typed_lower in n.lower() and not n.lower().startswith(typed_lower)]
+            matches = starts_with + contains
 
             if matches:
                 instrument_popup.name_dropdown['values'] = matches
