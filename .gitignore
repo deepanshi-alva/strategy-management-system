@@ -1,2 +1,5 @@
 important.txt
 users.db
+dist
+build
+main.spec
