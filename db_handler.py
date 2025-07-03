@@ -128,6 +128,20 @@ def get_workspace_by_id(workspace_id):
     conn.close()
     return result
 
+def update_workspace(workspace_id, name, theme, emoji):
+    conn = sqlite3.connect("users.db")
+    cur = conn.cursor()
+    cur.execute("UPDATE workspaces SET name=?, theme=?, icon=? WHERE id=?", (name, theme, emoji, workspace_id))
+    conn.commit()
+    conn.close()
+
+def delete_workspace(workspace_id):
+    conn = sqlite3.connect("users.db")
+    cur = conn.cursor()
+    cur.execute("DELETE FROM workspaces WHERE id=?", (workspace_id,))
+    conn.commit()
+    conn.close()
+
 def get_default_workspace_id(user_id):
     conn = sqlite3.connect("users.db")
     c = conn.cursor()

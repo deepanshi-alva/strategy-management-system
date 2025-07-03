@@ -31,6 +31,39 @@ def workspace_window(email):
     def set_default(workspace_id):
         db_handler.set_default_workspace(workspace_id, user_id)
         refresh_workspaces()
+    
+    def edit_workspace(workspace_id):
+        ws_data = db_handler.get_workspace_by_id(workspace_id)
+        if not ws_data:
+            messagebox.showerror("Error", "Workspace not found.")
+            return
+
+        current_name, current_theme, current_emoji = ws_data[0], ws_data[1], ws_data[2]
+
+        new_name = simpledialog.askstring("Edit Workspace", "Enter new name:", initialvalue=current_name, parent=win)
+        if not new_name:
+            return
+
+        def on_emoji_selected(new_emoji):
+            new_theme = simpledialog.askstring("Theme", "Enter theme (light or dark):", initialvalue=current_theme, parent=win)
+            if new_theme not in ["light", "dark"]:
+                new_theme = "light"
+            db_handler.update_workspace(workspace_id, new_name, new_theme, new_emoji)
+            refresh_workspaces()
+
+        show_emoji_picker(on_emoji_selected)
+
+    def delete_workspace(workspace_id):
+        confirm = messagebox.askyesno("Delete Workspace", "Are you sure you want to delete this workspace?")
+        if confirm:
+            db_handler.delete_workspace(workspace_id)
+            if workspace_id in open_workspace_windows:
+                try:
+                    open_workspace_windows[workspace_id].destroy()
+                except:
+                    pass
+                del open_workspace_windows[workspace_id]
+            refresh_workspaces()
 
     def open_workspace(workspace_id):
         if workspace_id in open_workspace_windows:
@@ -70,6 +103,8 @@ def workspace_window(email):
             if not is_default:
                 tk.Button(btn_frame, text="Set as Default", command=lambda i=wid: set_default(i)).pack(side="left", padx=5)
             tk.Button(btn_frame, text="Open", command=lambda i=wid: open_workspace(i)).pack(side="left", padx=5)
+            tk.Button(btn_frame, text="Edit", command=lambda i=wid: edit_workspace(i)).pack(side="left", padx=5)
+            tk.Button(btn_frame, text="Delete", command=lambda i=wid: delete_workspace(i)).pack(side="left", padx=5)
 
     def show_emoji_picker(callback):
         emoji_win = Toplevel(win)
