@@ -6,14 +6,44 @@ import ui_workspace
 import db_handler
 import sqlite3
 
-def initialize_user_session_counter(user_id):
+def reinitialize_session_ids(user_id):
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
-    # Reset counter to 0 for new session
-    cur.execute("REPLACE INTO user_session_counters (user_id, current_id) VALUES (?, ?)", (user_id, 0))
+
+    # Step 1: Get all user tables and their physical names
+    cur.execute("SELECT table_name, physical_table_name FROM user_tables WHERE user_id = ?", (user_id,))
+    tables = cur.fetchall()
+
+    all_rows = []
+    table_map = {}
+
+    # Step 2: Collect all rows with current IDs
+    for table_name, physical_table in tables:
+        cur.execute(f"SELECT ID FROM {physical_table}")
+        rows = cur.fetchall()
+        for row in rows:
+            all_rows.append((int(row[0]), table_name, physical_table))
+        table_map[table_name] = physical_table
+
+    # Step 3: Sort and reassign new IDs
+    all_rows.sort(key=lambda x: x[0])  # Sort by existing ID
+    id_mapping = {}
+    for new_id, (old_id, table_name, physical_table) in enumerate(all_rows, start=1):
+        id_mapping[(physical_table, old_id)] = new_id
+
+    # Step 4: Update tables with new IDs
+    for (physical_table, old_id), new_id in id_mapping.items():
+        cur.execute(f"UPDATE {physical_table} SET ID = ? WHERE ID = ?", (new_id, old_id))
+
+    # Step 5: Update counter
+    if all_rows:
+        last_id = len(all_rows)
+    else:
+        last_id = 0
+    cur.execute("REPLACE INTO user_session_counters (user_id, current_id) VALUES (?, ?)", (user_id, last_id))
+
     conn.commit()
     conn.close()
-
 
 def login_window():
     win = tk.Tk()
@@ -56,7 +86,7 @@ def login_window():
             messagebox.showinfo("Success", "Login Successful!")
             win.destroy()
             user_id = db_handler.get_user_id(email)
-            initialize_user_session_counter(user_id)
+            reinitialize_session_ids(user_id)
             default_workspace_id = db_handler.get_default_workspace_id(user_id)
             if default_workspace_id:
                 from ui_workspace_view import open_workspace_layout
