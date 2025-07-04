@@ -1,8 +1,4 @@
-import socket
-import threading
-import json
-import time
-import argparse
+import socket, threading, json, time, argparse
 from datetime import datetime
 
 class TradingTCPServer:
