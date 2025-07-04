@@ -24,7 +24,7 @@ class TradingTCPServer:
                 threading.Thread(target=self._handle_client, args=(client_socket, address), daemon=True).start()
 
         except Exception as e:
-            print(f"❌ Server error: {e}")
+            print(f"❌ Server error: {e}") 
 
     def stop(self):
         self.running = False
