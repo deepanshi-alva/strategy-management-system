@@ -456,7 +456,7 @@ def open_workspace_layout(workspace_id, email, master_win=None):
         widgets = entry_widgets_by_row_id.get(row_id)
         if widgets:
             if "STATUS" in widgets:
-                widgets["STATUS"].config(state='readonly')
+                widgets["STATUS"].config(state='normal')
                 widgets["STATUS"].delete(0, tk.END)
                 widgets["STATUS"].insert(0, "INACTIVE")
                 widgets["STATUS"].config(state='readonly', background="white")  # Set background to white
