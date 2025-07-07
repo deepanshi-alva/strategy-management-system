@@ -15,7 +15,6 @@ def select_instrument(callback):
     symbol_to_instruments = {}
     for name, symbol, token in instruments:
         symbol_to_instruments.setdefault(symbol, []).append((name, symbol, token))
-
     distinct_symbols = sorted(symbol_to_instruments.keys())
 
     if instrument_popup is None or not instrument_popup.winfo_exists():
@@ -127,7 +126,6 @@ def select_instrument(callback):
         instrument_popup.name_dropdown.bind("<KeyRelease>", on_name_keyrelease)
 
         # Update instrument list when symbol is selected
-         # Update instrument list when symbol is selected
         def on_symbol_change(event):
             selected_symbol = instrument_popup.symbol_var.get()
             if selected_symbol == "-- Select a Symbol --":

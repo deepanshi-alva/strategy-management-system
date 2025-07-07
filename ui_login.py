@@ -88,14 +88,15 @@ def login_window():
             user_id = db_handler.get_user_id(email)
             reinitialize_session_ids(user_id)
             default_workspace_id = db_handler.get_default_workspace_id(user_id)
-            if default_workspace_id:
-                from ui_workspace_view import open_workspace_layout
-                open_workspace_layout(default_workspace_id, email)
-            else:
-                ui_workspace.workspace_window(email)
+            # if default_workspace_id:
+            #     from ui_workspace_view import open_workspace_layout
+            #     open_workspace_layout(default_workspace_id, email)
+            # else:
+            ui_workspace.workspace_window(email)
         else:
             messagebox.showerror("Failed", "Invalid credentials")
 
     tk.Button(frame, text="Login", width=20, command=login, bg="#2196F3", fg="white").pack(pady=10)
     tk.Button(frame, text="Go to Signup", command=lambda:[win.destroy(), ui_signup.signup_window()]).pack()
     win.mainloop()
+ 

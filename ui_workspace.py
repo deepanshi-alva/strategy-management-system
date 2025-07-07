@@ -12,9 +12,10 @@ EMOJIS = ["📁", "📊", "🧾", "📈", "🗂️", "💼", "📋", "🧮", "�
 def workspace_window(email):
     win = tk.Tk()
     win.title("Workspaces")
-    win.attributes("-fullscreen", True)
+    # win.attributes("-fullscreen", True)
 
     user_id = db_handler.get_user_id(email)
+    opened_default = False
 
     def exit_fullscreen():
         win.attributes("-fullscreen", False)
@@ -34,7 +35,7 @@ def workspace_window(email):
     
     def edit_workspace(workspace_id):
         ws_data = db_handler.get_workspace_by_id(workspace_id)
-        if not ws_data:
+        if not ws_data:     
             messagebox.showerror("Error", "Workspace not found.")
             return
 
@@ -82,6 +83,7 @@ def workspace_window(email):
             open_workspace_windows[workspace_id] = new_win
 
     def refresh_workspaces():
+        nonlocal opened_default
         for widget in workspace_frame.winfo_children():
             widget.destroy()
 
@@ -105,6 +107,13 @@ def workspace_window(email):
             tk.Button(btn_frame, text="Open", command=lambda i=wid: open_workspace(i)).pack(side="left", padx=5)
             tk.Button(btn_frame, text="Edit", command=lambda i=wid: edit_workspace(i)).pack(side="left", padx=5)
             tk.Button(btn_frame, text="Delete", command=lambda i=wid: delete_workspace(i)).pack(side="left", padx=5)
+        # Auto-open default workspace
+        if not opened_default:
+            default_workspace_id = db_handler.get_default_workspace_id(user_id)
+            if default_workspace_id:
+                open_workspace(default_workspace_id)
+                opened_default = True
+
 
     def show_emoji_picker(callback):
         emoji_win = Toplevel(win)
