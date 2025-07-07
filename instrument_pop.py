@@ -165,6 +165,7 @@ def select_instrument(callback):
             messagebox.showerror("Error", "Selected instrument not found.")
 
         tk.Button(instrument_popup, text="OK", command=on_ok).pack(side="left", padx=20, pady=10)
+        
         # --- IMPORTANT CHANGE 3: Create a separate handler for Cancel button ---
         def on_cancel():
             global instrument_popup
