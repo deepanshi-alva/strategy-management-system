@@ -7,40 +7,54 @@ import db_handler
 import sqlite3
 
 def reinitialize_session_ids(user_id):
+    import sqlite3
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
 
-    # Step 1: Get all user tables and their physical names
-    cur.execute("SELECT table_name, physical_table_name FROM user_tables WHERE user_id = ?", (user_id,))
-    tables = cur.fetchall()
-
     all_rows = []
-    table_map = {}
+    current_id = 1  # Start fresh for this user
 
-    # Step 2: Collect all rows with current IDs
-    for table_name, physical_table in tables:
-        cur.execute(f"SELECT ID FROM {physical_table}")
-        rows = cur.fetchall()
-        for row in rows:
-            all_rows.append((int(row[0]), table_name, physical_table))
-        table_map[table_name] = physical_table
+    # Step 1: Get all workspaces for the user ordered by creation time
+    cur.execute("""
+        SELECT id FROM workspaces
+        WHERE user_id = ?
+        ORDER BY datetime(created_at) ASC
+    """, (user_id,))
+    workspaces = [row[0] for row in cur.fetchall()]
 
-    # Step 3: Sort and reassign new IDs
-    all_rows.sort(key=lambda x: x[0])  # Sort by existing ID
-    id_mapping = {}
-    for new_id, (old_id, table_name, physical_table) in enumerate(all_rows, start=1):
-        id_mapping[(physical_table, old_id)] = new_id
+    # Step 2: For each workspace, get associated tables
+    for workspace_id in workspaces:
+        cur.execute("""
+            SELECT table_name, physical_table_name
+            FROM user_tables
+            WHERE user_id = ? AND workspace_id = ?
+        """, (user_id, workspace_id))
+        tables = cur.fetchall()
 
-    # Step 4: Update tables with new IDs
-    for (physical_table, old_id), new_id in id_mapping.items():
-        cur.execute(f"UPDATE {physical_table} SET ID = ? WHERE ID = ?", (new_id, old_id))
+        # Step 3: For each table, fetch its rows
+        for table_name, physical_table in tables:
+            try:
+                cur.execute(f"SELECT ID FROM {physical_table}")
+                rows = cur.fetchall()
 
-    # Step 5: Update counter
-    if all_rows:
-        last_id = len(all_rows)
-    else:
-        last_id = 0
-    cur.execute("REPLACE INTO user_session_counters (user_id, current_id) VALUES (?, ?)", (user_id, last_id))
+                # Step 4: Reassign new IDs using the running counter
+                for row in rows:
+                    old_id = row[0]
+                    cur.execute(f"""
+                        UPDATE {physical_table}
+                        SET ID = ?
+                        WHERE ID = ?
+                    """, (current_id, old_id))
+                    current_id += 1
+            except sqlite3.Error as e:
+                print(f"Error processing table {physical_table}: {e}")
+                continue
+
+    # Step 5: Update user's session counter
+    cur.execute("""
+        REPLACE INTO user_session_counters (user_id, current_id)
+        VALUES (?, ?)
+    """, (user_id, current_id - 1))  # last assigned ID
 
     conn.commit()
     conn.close()
@@ -77,21 +91,22 @@ def login_window():
     toggle_btn.pack(side="left", padx=5)
 
     def login():
+        # Gets user input from textboxes.
         email = email_entry.get().strip()
         password = password_entry.get().strip()
+
+        # Shows a warning if either field is empty.
         if not email or not password:
             messagebox.showwarning("Empty Fields", "Please fill in all fields.")
             return
+        
+        # If login is successful:
         if verify_user(email, password):
             messagebox.showinfo("Success", "Login Successful!")
             win.destroy()
             user_id = db_handler.get_user_id(email)
             reinitialize_session_ids(user_id)
             default_workspace_id = db_handler.get_default_workspace_id(user_id)
-            # if default_workspace_id:
-            #     from ui_workspace_view import open_workspace_layout
-            #     open_workspace_layout(default_workspace_id, email)
-            # else:
             ui_workspace.workspace_window(email)
         else:
             messagebox.showerror("Failed", "Invalid credentials")
