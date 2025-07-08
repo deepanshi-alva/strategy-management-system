@@ -114,7 +114,6 @@ def workspace_window(email):
                 open_workspace(default_workspace_id)
                 opened_default = True
 
-
     def show_emoji_picker(callback):
         emoji_win = Toplevel(win)
         emoji_win.title("Choose an Emoji")
