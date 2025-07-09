@@ -2,11 +2,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import db_handler
 import json
-import ui_workspace
 from instrument_pop import select_instrument
 from functools import partial
 from tcp_utils import send_tcp_command
 import threading
+from window_utils import center_window, _perform_centering_on_restore, on_configure, cleanup_window 
 
 def get_next_session_id(user_id):
     conn = db_handler.sqlite3.connect("users.db")
@@ -122,8 +122,6 @@ def open_create_table_popup(parent, workspace_id, user_id, refresh_callback):
 
     add_column()
 
-    tk.Button(popup, text="Add Column", command=add_column).pack(pady=5)
-
     def create_table():
         table_name = table_name_entry.get().strip().upper()
         if not table_name:
@@ -173,7 +171,8 @@ def open_create_table_popup(parent, workspace_id, user_id, refresh_callback):
         popup.destroy()
         refresh_callback()
 
-    tk.Button(popup, text="Create Table", command=create_table, bg="green", fg="white").pack(pady=10)
+    tk.Button(popup, text="Add Column", command=add_column).pack(pady=5)
+    tk.Button(popup, text="Create Table", command=create_table, bg="green", fg="white", font=("Arial", 12, "bold")).pack(pady=10)
 
 # Function to edit table schema
 def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh_callback):
@@ -380,8 +379,8 @@ def handle_add_row(user_id, workspace_id, table_name, refresh_callback):
     # Open instrument selection popup
     select_instrument(after_instrument_selected)
 
-# Main layout for workspace
-def open_workspace_layout(workspace_id, email, master_win=None):
+def open_workspace_layout(workspace_id, email, master_win=None, on_close_callback=None):
+
     user_id = db_handler.get_user_id(email)
     workspace = db_handler.get_workspace_by_id(workspace_id)
     entry_widgets_by_row_id = {}
@@ -392,8 +391,30 @@ def open_workspace_layout(workspace_id, email, master_win=None):
 
     win = tk.Toplevel(master=master_win)
     win.title(name)
-    # win.attributes("-fullscreen", True)
+    win.attributes("-fullscreen", True)
+
+    center_window(win)
+
     win.configure(bg=bg_color)
+
+    # MODIFIED: on_workspace_close now calls the provided callback
+    def on_workspace_close():
+        if on_close_callback:
+            on_close_callback(workspace_id) # Notify the main management (ui_workspace.py)
+        cleanup_window(win)
+        win.destroy()
+        if master_win:
+            master_win.deiconify()
+            master_win.lift()
+            master_win.focus_force()
+
+    win.protocol("WM_DELETE_WINDOW", on_workspace_close) # Handle window closing via 'X' button
+
+    def exit_fullscreen():
+        win.attributes("-fullscreen", False)
+        win.wm_state('normal')
+        win.geometry("800x600")
+        center_window(win)
 
     # === HEADER ===
     header = tk.Frame(win, bg=bg_color)
@@ -450,7 +471,6 @@ def open_workspace_layout(workspace_id, email, master_win=None):
                     widgets["delete_btn"].config(state="disabled")
                 if "stop_btn" in widgets:
                     widgets["stop_btn"].config(state="normal")
-
 
     def update_row_ui_inactive(row_id):
         widgets = entry_widgets_by_row_id.get(row_id)
@@ -572,7 +592,7 @@ def open_workspace_layout(workspace_id, email, master_win=None):
         total = len(rows)
         done = [0]  # mutable counter
 
-        # Loop through each row and update it to 'WAITING' immediately
+        # Loop through each row and update it to 'WAITING'
         for row in rows:
             row_id = row[col_names.index("ID")]  # Assuming "ID" is the first column in schema
             status_value = row[col_names.index("STATUS")].upper()
@@ -734,7 +754,6 @@ def open_workspace_layout(workspace_id, email, master_win=None):
             row_widgets["SELECTED"] = selected_var
             entry_widgets_by_row_id[row_id] = row_widgets
 
-
             # Define static/system columns
             static_columns = {"ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"}
 
@@ -832,7 +851,6 @@ def open_workspace_layout(workspace_id, email, master_win=None):
 
                 return apply
 
-            
             def make_stop_callback(row_widgets=row_widgets, physical_table=physical_table, row_id=row_data[col_indices["ID"]]):
                 def stop():
                     # Show "WAITING" immediately when Stop is clicked
@@ -868,9 +886,6 @@ def open_workspace_layout(workspace_id, email, master_win=None):
                     send_tcp_command(command, callback=on_response)
 
                 return stop
-
-
-
 
             def make_delete_callback(row_id=row_data[col_indices["ID"]]):
                 def delete():
@@ -942,7 +957,7 @@ def open_workspace_layout(workspace_id, email, master_win=None):
 
         selected_table = table_var.get()
         if not selected_table:
-            status_label.config(text="No table selected", fg="gray")
+            status_label.config(text="No strategies available", fg="gray")
             return
 
         cur.execute("SELECT physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
@@ -961,7 +976,6 @@ def open_workspace_layout(workspace_id, email, master_win=None):
         except:
             total = 0
             active = 0
-
 
         conn.close()
     
@@ -1043,15 +1057,17 @@ def open_workspace_layout(workspace_id, email, master_win=None):
         btn.pack(side="left", padx=5)
 
     def back():
-        # win.destroy()
-        master_win.lift()
-        master_win.focus_force()
-        # ui_workspace.workspace_window(email)
+        on_workspace_close() # Use the consolidated close function
     
     # Add "Back to Workspaces" after "Stop All"
-    back_btn = tk.Button(action_btns, text="Back to Workspaces", command=lambda: back(),
+    back_btn = tk.Button(action_btns, text="Back to Workspaces", command=back,
                         bg="#f44336", fg="white", font=("Arial", 12, "bold"))
     back_btn.pack(side="left", padx=5)
+
+    right_buttons = tk.Frame(header)
+    right_buttons.pack(side="right")
+
+    tk.Button(right_buttons, text="Exit Fullscreen", command=exit_fullscreen).pack(side="left")
 
          # === STATUS BAR ===
     status_frame = tk.Frame(win, bg=bg_color)
@@ -1063,5 +1079,5 @@ def open_workspace_layout(workspace_id, email, master_win=None):
 
     refresh_tables()
 
-    win.mainloop()
+    # REMOVE THIS LINE: win.mainloop()
     return win

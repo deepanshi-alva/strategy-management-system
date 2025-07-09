@@ -4,7 +4,7 @@ from db_handler import verify_user
 import ui_signup
 import ui_workspace
 import db_handler
-import sqlite3
+from window_utils import center_window, _perform_centering_on_restore, on_configure, cleanup_window
 
 def reinitialize_session_ids(user_id):
     import sqlite3
@@ -60,15 +60,19 @@ def reinitialize_session_ids(user_id):
     conn.close()
 
 def login_window():
+    """Creates and displays the login window."""
     win = tk.Tk()
-    win.title("Login")
+    win.title("LOGIN")
     win.geometry("400x300")
-    # win.resizable(False, False)
+
+    center_window(win)
+    win.state('zoomed')
+    win.bind_id = win.bind('<Configure>', lambda event: on_configure(win, event, 400, 300))
 
     frame = tk.Frame(win)
     frame.pack(expand=True)
 
-    tk.Label(frame, text="Login", font=("Arial", 16, "bold")).pack(pady=10)
+    tk.Label(frame, text="LOGIN", font=("Arial", 16, "bold")).pack(pady=10)
 
     tk.Label(frame, text="Email").pack()
     email_entry = tk.Entry(frame, width=30)
@@ -103,15 +107,15 @@ def login_window():
         # If login is successful:
         if verify_user(email, password):
             messagebox.showinfo("Success", "Login Successful!")
+            cleanup_window(win)
             win.destroy()
             user_id = db_handler.get_user_id(email)
             reinitialize_session_ids(user_id)
-            default_workspace_id = db_handler.get_default_workspace_id(user_id)
             ui_workspace.workspace_window(email)
         else:
             messagebox.showerror("Failed", "Invalid credentials")
 
-    tk.Button(frame, text="Login", width=20, command=login, bg="#2196F3", fg="white").pack(pady=10)
-    tk.Button(frame, text="Go to Signup", command=lambda:[win.destroy(), ui_signup.signup_window()]).pack()
+    tk.Button(frame, text="Login", width=20, command=login, bg="#2196F3", fg="white", font=("Arial", 10, "bold")).pack(pady=10)
+    tk.Button(frame, text="Go to Signup", width=20, bg="#07365C", fg="white", font=("Arial", 10, "bold","underline"), command=lambda:[cleanup_window(win), win.destroy(), ui_signup.signup_window()]).pack()
     win.mainloop()
  

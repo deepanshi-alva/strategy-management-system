@@ -1,5 +1,3 @@
-# instrument_pop.py
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 import config  # access the shared list
@@ -15,6 +13,7 @@ def select_instrument(callback):
     symbol_to_instruments = {}
     for name, symbol, token in instruments:
         symbol_to_instruments.setdefault(symbol, []).append((name, symbol, token))
+        
     distinct_symbols = sorted(symbol_to_instruments.keys())
 
     if instrument_popup is None or not instrument_popup.winfo_exists():
@@ -165,7 +164,6 @@ def select_instrument(callback):
             messagebox.showerror("Error", "Selected instrument not found.")
 
         tk.Button(instrument_popup, text="OK", command=on_ok).pack(side="left", padx=20, pady=10)
-        
         # --- IMPORTANT CHANGE 3: Create a separate handler for Cancel button ---
         def on_cancel():
             global instrument_popup

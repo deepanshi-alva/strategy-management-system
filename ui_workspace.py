@@ -3,6 +3,7 @@ from tkinter import simpledialog, messagebox, Toplevel
 import db_handler
 import ui_login
 from ui_workspace_view import open_workspace_layout
+from window_utils import center_window, _perform_centering_on_restore, on_configure, cleanup_window 
 
 open_workspace_windows = {}
 
@@ -12,16 +13,32 @@ EMOJIS = ["📁", "📊", "🧾", "📈", "🗂️", "💼", "📋", "🧮", "�
 def workspace_window(email):
     win = tk.Tk()
     win.title("Workspaces")
-    # win.attributes("-fullscreen", True)
+    win.attributes("-fullscreen", True)
+
+    center_window(win)
 
     user_id = db_handler.get_user_id(email)
-    opened_default = False
+
+    default_workspace_id = db_handler.get_default_workspace_id(user_id)
+    if default_workspace_id:
+        # Hide the main workspace list window temporarily
+        print(f"DEBUG: Default workspace ID found: {default_workspace_id}. Withdrawing main window.")
+        win.withdraw()
+        print("DEBUG: Scheduling default workspace to open.")
+        win.after(100, lambda: open_workspace(default_workspace_id, master_win=win))
+        print("DEBUG: Scheduled.")
 
     def exit_fullscreen():
-        win.attributes("-fullscreen", False)
+        if win.winfo_exists(): # Check if main window still exists
+            win.attributes("-fullscreen", False)
+            win.wm_state('normal')
+            win.geometry("800x800")
+            center_window(win)
 
     def logout():
-        win.destroy()
+        if win.winfo_exists(): # Check if main window still exists before destroying
+            cleanup_window(win)
+            win.destroy()
         conn = db_handler.sqlite3.connect("users.db")
         cur = conn.cursor()
         cur.execute("DELETE FROM user_session_counters WHERE user_id = ?", (user_id,))
@@ -32,10 +49,10 @@ def workspace_window(email):
     def set_default(workspace_id):
         db_handler.set_default_workspace(workspace_id, user_id)
         refresh_workspaces()
-    
+
     def edit_workspace(workspace_id):
         ws_data = db_handler.get_workspace_by_id(workspace_id)
-        if not ws_data:     
+        if not ws_data:
             messagebox.showerror("Error", "Workspace not found.")
             return
 
@@ -56,38 +73,67 @@ def workspace_window(email):
 
     def delete_workspace(workspace_id):
         confirm = messagebox.askyesno("Delete Workspace", "Are you sure you want to delete this workspace?")
-        if confirm:
-            db_handler.delete_workspace(workspace_id)
-            if workspace_id in open_workspace_windows:
-                try:
-                    open_workspace_windows[workspace_id].destroy()
-                except:
-                    pass
-                del open_workspace_windows[workspace_id]
-            refresh_workspaces()
+        if not confirm:
+            return
 
-    def open_workspace(workspace_id):
+        db_handler.delete_workspace(workspace_id)
+        
+        # MODIFIED: Clean up the window if it's still open and remove from tracking
         if workspace_id in open_workspace_windows:
-            window = open_workspace_windows[workspace_id]
             try:
-                # Try to bring the window to front
-                window.lift()
-                window.focus_force()
-            except tk.TclError:
-                # If window was closed without removing from dict, re-open
-                del open_workspace_windows[workspace_id]
-                new_win = open_workspace_layout(workspace_id, email, master_win=win)
-                open_workspace_windows[workspace_id] = new_win
+                # Only destroy if the window actually exists
+                if open_workspace_windows[workspace_id].winfo_exists():
+                    open_workspace_windows[workspace_id].destroy()
+            except Exception as e:
+                print(f"Error destroying workspace window {workspace_id}: {e}")
+                pass # Window might have already been destroyed or other error
+            del open_workspace_windows[workspace_id]
+        
+        refresh_workspaces()
+
+    # MODIFIED FUNCTION: open_workspace to properly manage single instances
+    def open_workspace(workspace_id, master_win):
+        print(f"DEBUG: open_workspace called for ID: {workspace_id}")
+        def workspace_close_callback(closed_workspace_id):
+            print(f"DEBUG: Workspace close callback triggered for ID: {closed_workspace_id}")
+            if closed_workspace_id in open_workspace_windows:
+                print(f"DEBUG: Removing ID {closed_workspace_id} from tracking.")
+                del open_workspace_windows[closed_workspace_id]
+            # When a workspace window closes, ensure the master_win is brought back if it exists
+            if master_win and master_win.winfo_exists():
+                master_win.deiconify()
+                master_win.lift()
+                master_win.focus_force()
+
+        # Check if a window for this workspace_id already exists and is still active
+        if workspace_id in open_workspace_windows and open_workspace_windows[workspace_id].winfo_exists():
+            print(f"DEBUG: Found existing window for ID {workspace_id}. Bringing to front.")
+            window = open_workspace_windows[workspace_id]
+            window.deiconify() # Ensure it's not minimized
+            window.lift()
+            window.focus_force()
+            # If main window was withdrawn for default, bring it back
+            if master_win and master_win.winfo_exists() and master_win.state() == 'withdrawn':
+                 master_win.deiconify()
+                 master_win.lift()
         else:
-            new_win = open_workspace_layout(workspace_id, email, master_win=win)
+            print(f"DEBUG: Creating NEW window for ID {workspace_id}.")
+            new_win = open_workspace_layout(workspace_id, email, master_win=master_win, on_close_callback=workspace_close_callback)
             open_workspace_windows[workspace_id] = new_win
+            
+            if master_win and master_win.winfo_exists() and master_win.state() == 'withdrawn':
+                 master_win.deiconify()
+                 master_win.lift()
+
 
     def refresh_workspaces():
-        nonlocal opened_default
+        if not win.winfo_exists(): 
+            return
         for widget in workspace_frame.winfo_children():
             widget.destroy()
 
         workspaces = db_handler.get_workspaces(user_id)
+       
         for wid, name, is_default in workspaces:
             ws_data = db_handler.get_workspace_by_id(wid)
             theme = ws_data[1]
@@ -97,27 +143,27 @@ def workspace_window(email):
             card.pack(padx=10, pady=10, fill="x")
 
             tk.Label(card, text=f"{icon}  {name}", font=("Arial", 16, "bold"),
-                     bg=card["bg"], fg="black" if theme == "light" else "white").pack(anchor="w", padx=10, pady=5)
+                    bg=card["bg"], fg="black" if theme == "light" else "white").pack(anchor="w", padx=10, pady=5)
 
             btn_frame = tk.Frame(card, bg=card["bg"])
             btn_frame.pack(anchor="e", padx=10, pady=5)
 
+            if is_default:
+                default_label = tk.Label(btn_frame, text="Default", font=("Arial", 10, "italic","bold"),
+                                        bg=btn_frame["bg"], fg="white")
+                default_label.pack(side="left", padx=5) 
             if not is_default:
                 tk.Button(btn_frame, text="Set as Default", command=lambda i=wid: set_default(i)).pack(side="left", padx=5)
-            tk.Button(btn_frame, text="Open", command=lambda i=wid: open_workspace(i)).pack(side="left", padx=5)
+            tk.Button(btn_frame, text="Open", command=lambda i=wid: open_workspace(i, master_win=win)).pack(side="left", padx=5)
             tk.Button(btn_frame, text="Edit", command=lambda i=wid: edit_workspace(i)).pack(side="left", padx=5)
             tk.Button(btn_frame, text="Delete", command=lambda i=wid: delete_workspace(i)).pack(side="left", padx=5)
-        # Auto-open default workspace
-        if not opened_default:
-            default_workspace_id = db_handler.get_default_workspace_id(user_id)
-            if default_workspace_id:
-                open_workspace(default_workspace_id)
-                opened_default = True
 
     def show_emoji_picker(callback):
+        if not win.winfo_exists(): # Don't show picker if main window is destroyed
+            return
         emoji_win = Toplevel(win)
         emoji_win.title("Choose an Emoji")
-        emoji_win.geometry("300x150")
+        emoji_win.geometry("400x150")
         emoji_win.grab_set()  # Modal
 
         def choose(e):
@@ -129,6 +175,8 @@ def workspace_window(email):
             b.grid(row=idx // 5, column=idx % 5, padx=5, pady=5)
 
     def create_new_workspace():
+        if not win.winfo_exists(): # Don't create if main window is destroyed
+            return
         name = simpledialog.askstring("New Workspace", "Enter workspace name:", parent=win)
         if not name:
             return
@@ -172,6 +220,7 @@ def workspace_window(email):
 
     canvas.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
+    scroll_frame.pack(fill="both", expand=True)
 
     workspace_frame = scroll_frame
     refresh_workspaces()
