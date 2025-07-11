@@ -399,8 +399,30 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     # MODIFIED: on_workspace_close now calls the provided callback
     def on_workspace_close():
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+        cur.execute("SELECT table_name, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=?", (user_id, workspace_id))
+        tables = cur.fetchall()
+
+        active_tables = []
+        for logical_name, physical_name in tables:
+            try:
+                cur.execute(f"SELECT COUNT(*) FROM {physical_name} WHERE STATUS='ACTIVE'")
+                if cur.fetchone()[0] > 0:
+                    active_tables.append(logical_name)
+            except:
+                continue
+
+        conn.close()
+
+        if active_tables:
+            table_list = ", ".join(active_tables)
+            messagebox.showwarning("Active Strategies",
+                f"❗ Please terminate your running strategies in the following table(s) before closing:\n\n{table_list}")
+            return
+
         if on_close_callback:
-            on_close_callback(workspace_id) # Notify the main management (ui_workspace.py)
+            on_close_callback(workspace_id)
         cleanup_window(win)
         win.destroy()
         if master_win:
@@ -749,7 +771,42 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             # Add checkbox for selection
             status_value = str(row_data[col_indices.get("STATUS", -1)]).upper()
             selected_var = tk.IntVar(value=1 if status_value == "ACTIVE" else 0)
-            cb = tk.Checkbutton(scroll_frame, variable=selected_var, bg=bg_color)
+            def on_checkbox_toggle(var=selected_var, rid=row_id, pdata=row_data):
+                if var.get() == 1:
+                    # User ticked the checkbox manually — send TCP apply
+                    update_row_ui_waiting(rid)
+
+                    data = dict(zip(col_names, pdata))
+                    data.update({
+                        "strategy_name": data.get("STRATEGY", ""),
+                        "table_type": data.get("TABLE", "").lower(),
+                        "instrument_id": data.get("InstrumentID", ""),
+                        "instrument_name": data.get("InstrumentName", ""),
+                        "status": data.get("STATUS", ""),
+                        "user_id": user_id,
+                        "workspace_id": workspace_id,
+                        "row_id": data.get("ID", "")
+                    })
+
+                    command = {
+                        "action": "apply_strategy",
+                        "data": data
+                    }
+
+                    def on_response(response):
+                        if response.get("status") == "success":
+                            update_row_ui_active(rid)
+                            conn2 = db_handler.sqlite3.connect("users.db")
+                            cur2 = conn2.cursor()
+                            cur2.execute(f"UPDATE {physical_table} SET STATUS = 'ACTIVE' WHERE ID = ?", (rid,))
+                            conn2.commit()
+                            conn2.close()
+                        else:
+                            messagebox.showerror("TCP Error", f"❌ {response.get('message')}")
+                            update_row_ui_inactive(rid)
+
+                    send_tcp_command(command, callback=on_response)
+            cb = tk.Checkbutton(scroll_frame, variable=selected_var, bg=bg_color, command=on_checkbox_toggle)
             cb.grid(row=row_idx, column=0, sticky="nsew")
             row_widgets["SELECTED"] = selected_var
             entry_widgets_by_row_id[row_id] = row_widgets
