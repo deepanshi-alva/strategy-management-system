@@ -23,7 +23,6 @@ def workspace_window(email):
     if default_workspace_id:
         # Hide the main workspace list window temporarily
         print(f"DEBUG: Default workspace ID found: {default_workspace_id}. Withdrawing main window.")
-        win.withdraw()
         print("DEBUG: Scheduling default workspace to open.")
         win.after(100, lambda: open_workspace(default_workspace_id, master_win=win))
         print("DEBUG: Scheduled.")
@@ -62,7 +61,6 @@ def workspace_window(email):
         # Call the new consolidated popup for editing
         open_edit_workspace_popup(win, workspace_id, current_name, current_theme, current_emoji, refresh_workspaces)
 
-
     def delete_workspace(workspace_id):
         confirm = messagebox.askyesno("Delete Workspace", "Are you sure you want to delete this workspace?")
         if not confirm:
@@ -86,42 +84,41 @@ def workspace_window(email):
     # MODIFIED FUNCTION: open_workspace to properly manage single instances
     def open_workspace(workspace_id, master_win):
         print(f"DEBUG: open_workspace called for ID: {workspace_id}")
+
+        if workspace_id in open_workspace_windows:
+            existing_win = open_workspace_windows[workspace_id]
+            if existing_win.winfo_exists():
+                print(f"DEBUG: Reusing window for workspace ID {workspace_id}")
+                existing_win.deiconify()
+                existing_win.lift()
+                existing_win.focus_force()
+                return
+            else:
+                print(f"DEBUG: Window reference existed but was invalid. Removing it.")
+                del open_workspace_windows[workspace_id]
+
         def workspace_close_callback(closed_workspace_id):
             print(f"DEBUG: Workspace close callback triggered for ID: {closed_workspace_id}")
             if closed_workspace_id in open_workspace_windows:
-                print(f"DEBUG: Removing ID {closed_workspace_id} from tracking.")
-                del open_workspace_windows[closed_workspace_id]
-            # When a workspace window closes, ensure the master_win is brought back if it exists
-            if master_win and master_win.winfo_exists():
-                master_win.deiconify()
-                master_win.lift()
-                master_win.focus_force()
+                try:
+                    win = open_workspace_windows.pop(closed_workspace_id, None)
+                    if win and win.winfo_exists():
+                        print(f"DEBUG: Destroying window for ID: {closed_workspace_id}")
+                        win.destroy()
+                except Exception as e:
+                    print(f"DEBUG: Exception during destroy: {e}")
 
-        # Check if a window for this workspace_id already exists and is still active
-        if workspace_id in open_workspace_windows and open_workspace_windows[workspace_id].winfo_exists():
-            print(f"DEBUG: Found existing window for ID {workspace_id}. Bringing to front.")
-            window = open_workspace_windows[workspace_id]
-            window.deiconify() # Ensure it's not minimized
-            window.lift()
-            window.focus_force()
-            # If main window was withdrawn for default, bring it back
-            if master_win and master_win.winfo_exists() and master_win.state() == 'withdrawn':
-                master_win.deiconify()
-                master_win.lift()
-        else:
-            print(f"DEBUG: Creating NEW window for ID {workspace_id}.")
-            ws_data = db_handler.get_workspace_by_id(workspace_id)
-            if ws_data:
-                ws_name, ws_theme, ws_icon = ws_data[0], ws_data[1], ws_data[2]
-                new_win = open_workspace_layout(workspace_id, email, master_win=master_win, on_close_callback=workspace_close_callback)
-                open_workspace_windows[workspace_id] = new_win
-            else:
-                print(f"Error: Workspace data not found for ID {workspace_id}")
-            
-            if master_win and master_win.winfo_exists() and master_win.state() == 'withdrawn':
-                master_win.deiconify()
-                master_win.lift()
-
+        new_win = open_workspace_layout(
+            workspace_id=workspace_id,
+            email=email,
+            master_win=master_win,
+            on_close_callback=workspace_close_callback
+        )
+        open_workspace_windows[workspace_id] = new_win
+        # new_win.protocol("WM_DELETE_WINDOW", lambda: workspace_close_callback(workspace_id))
+        new_win.deiconify()
+        new_win.lift()
+        new_win.focus_force()
 
     def refresh_workspaces():
         if not win.winfo_exists(): 
@@ -327,13 +324,11 @@ def workspace_window(email):
 
         popup.wait_window(popup) # Wait for the popup to close before returning control
 
-
     def create_new_workspace():
         if not win.winfo_exists(): # Don't create if main window is destroyed
             return
         # Call the new consolidated popup
         open_create_workspace_popup(win, user_id, refresh_workspaces) # Pass win, user_id, and refresh_workspaces
-
 
     # === HEADER ===
     header = tk.Frame(win)
@@ -426,7 +421,6 @@ def workspace_window(email):
 
     canvas.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
-    # REMOVED THIS LINE: scroll_frame should not be packed directly into 'win' again
     scroll_frame.pack(fill="both", expand=True) 
 
     workspace_frame = scroll_frame

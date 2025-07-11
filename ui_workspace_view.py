@@ -399,6 +399,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     # MODIFIED: on_workspace_close now calls the provided callback
     def on_workspace_close():
+        print("🔒 Attempting to close workspace...")
         conn = db_handler.sqlite3.connect("users.db")
         cur = conn.cursor()
         cur.execute("SELECT table_name, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=?", (user_id, workspace_id))
@@ -407,10 +408,13 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         active_tables = []
         for logical_name, physical_name in tables:
             try:
-                cur.execute(f"SELECT COUNT(*) FROM {physical_name} WHERE STATUS='ACTIVE'")
-                if cur.fetchone()[0] > 0:
+                cur.execute(f"SELECT COUNT(*) FROM {physical_name} WHERE UPPER(STATUS)='ACTIVE'")
+                count = cur.fetchone()[0]
+                print(f"Table {logical_name} has {count} active strategies")
+                if count > 0:
                     active_tables.append(logical_name)
-            except:
+            except Exception as e:
+                print(f"❌ Failed to check {physical_name}: {e}")
                 continue
 
         conn.close()
@@ -419,10 +423,12 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             table_list = ", ".join(active_tables)
             messagebox.showwarning("Active Strategies",
                 f"❗ Please terminate your running strategies in the following table(s) before closing:\n\n{table_list}")
-            return
+            return  # Don't close
 
+        print("✅ No active strategies. Closing workspace.")
         if on_close_callback:
             on_close_callback(workspace_id)
+
         cleanup_window(win)
         win.destroy()
         if master_win:
@@ -472,6 +478,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 widgets["ID"].config(state='readonly')
             if "SELECTED" in widgets:
                 widgets["SELECTED"].set(1)
+            if "CHECKBOX_WIDGET" in widgets: # <--- ADD THIS BLOCK
+                widgets["CHECKBOX_WIDGET"].config(bg=bg_color)
 
     def update_row_ui_active(row_id):
             widgets = entry_widgets_by_row_id.get(row_id)
@@ -487,6 +495,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                     widgets["ID"].config(state='readonly')
                 if "SELECTED" in widgets:
                     widgets["SELECTED"].set(1)
+                if "CHECKBOX_WIDGET" in widgets:
+                    widgets["CHECKBOX_WIDGET"].config(bg="#c7f9cc")
                 if "apply_btn" in widgets:
                     widgets["apply_btn"].config(state="disabled")
                 if "delete_btn" in widgets:
@@ -508,6 +518,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 widgets["ID"].config(state='readonly')
             if "SELECTED" in widgets:
                 widgets["SELECTED"].set(0)  # Deselect if needed
+            if "CHECKBOX_WIDGET" in widgets: 
+                widgets["CHECKBOX_WIDGET"].config(bg=bg_color)
             if "apply_btn" in widgets:
                 widgets["apply_btn"].config(state="normal")
             if "delete_btn" in widgets:
@@ -742,7 +754,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             is_editable = col_name in editable_cols
             header_color = "yellow" if is_editable else "blue"
             tk.Label(scroll_frame, text=col_name, font=("Arial", 10, "bold"),
-                    fg=header_color, bg="#d9d9d9", borderwidth=1, relief="solid", width=15).grid(row=0, column=col_idx, sticky="nsew")
+                    fg=header_color, bg="#1f2937", borderwidth=1, relief="solid", width=15).grid(row=0, column=col_idx, sticky="nsew")
 
         # Add headers for action buttons
         tk.Label(scroll_frame, text="Apply", font=("Arial", 10, "bold"),
@@ -765,50 +777,18 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         col_indices = {name: idx for idx, name in enumerate(col_names)}
 
         for row_idx, row_data in enumerate(rows, start=1):
+            row_bg = "#f9fafb" if row_idx % 2 == 0 else "#e5e7eb"
             row_widgets = {}
             row_id = row_data[col_indices.get("ID")]
             
             # Add checkbox for selection
             status_value = str(row_data[col_indices.get("STATUS", -1)]).upper()
             selected_var = tk.IntVar(value=1 if status_value == "ACTIVE" else 0)
-            def on_checkbox_toggle(var=selected_var, rid=row_id, pdata=row_data):
-                if var.get() == 1:
-                    # User ticked the checkbox manually — send TCP apply
-                    update_row_ui_waiting(rid)
-
-                    data = dict(zip(col_names, pdata))
-                    data.update({
-                        "strategy_name": data.get("STRATEGY", ""),
-                        "table_type": data.get("TABLE", "").lower(),
-                        "instrument_id": data.get("InstrumentID", ""),
-                        "instrument_name": data.get("InstrumentName", ""),
-                        "status": data.get("STATUS", ""),
-                        "user_id": user_id,
-                        "workspace_id": workspace_id,
-                        "row_id": data.get("ID", "")
-                    })
-
-                    command = {
-                        "action": "apply_strategy",
-                        "data": data
-                    }
-
-                    def on_response(response):
-                        if response.get("status") == "success":
-                            update_row_ui_active(rid)
-                            conn2 = db_handler.sqlite3.connect("users.db")
-                            cur2 = conn2.cursor()
-                            cur2.execute(f"UPDATE {physical_table} SET STATUS = 'ACTIVE' WHERE ID = ?", (rid,))
-                            conn2.commit()
-                            conn2.close()
-                        else:
-                            messagebox.showerror("TCP Error", f"❌ {response.get('message')}")
-                            update_row_ui_inactive(rid)
-
-                    send_tcp_command(command, callback=on_response)
-            cb = tk.Checkbutton(scroll_frame, variable=selected_var, bg=bg_color, command=on_checkbox_toggle)
+            cb_color = "#bbf7d0" if status_value == "ACTIVE" else row_bg
+            cb = tk.Checkbutton(scroll_frame, variable=selected_var, bg=cb_color, activebackground=cb_color, bd=0, highlightthickness=0)
             cb.grid(row=row_idx, column=0, sticky="nsew")
             row_widgets["SELECTED"] = selected_var
+            row_widgets["CHECKBOX_WIDGET"] = cb
             entry_widgets_by_row_id[row_id] = row_widgets
 
             # Define static/system columns
@@ -821,8 +801,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 val = row_data[col_idx]
                 is_static = col_name in static_columns
                 is_editable = col_name in editable_cols
-                entry = tk.Entry(scroll_frame, width=15, disabledforeground="black", justify="center")
-
+                entry = tk.Entry(scroll_frame, width=15, disabledforeground="black", justify="center", bg=row_bg, relief="flat")
                 val = row_data[col_idx]
                 entry.insert(0, val)
 
@@ -847,13 +826,13 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                     entry.bind("<FocusOut>", save_edit)
                 else:
                     # Make truly read-only (no cursor, no edits)
-                    entry.config(state="readonly", readonlybackground="#e5e7eb", fg="black")
+                    entry.config(state="readonly", readonlybackground=row_bg, fg="black")
 
                 if is_static:
-                    header_bg = "#1f4e78"  # Deep blue
+                    header_bg = "#2e6291"  # Deep blue
                     header_fg = "white"
                 elif is_editable:
-                    header_bg = "#facc15"  # Amber/yellow
+                    header_bg = "#489ad1"  # Amber/yellow
                     header_fg = "black"
                 else:
                     header_bg = "#3b82f6"  # Blue for readonly user-defined
@@ -862,7 +841,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 tk.Label(scroll_frame, text=col_name, font=("Arial", 10, "bold"),
                         fg=header_fg, bg=header_bg, borderwidth=1, relief="solid", width=15).grid(row=0, column=col_idx + 1, sticky="nsew")
 
-                entry.grid(row=row_idx, column=col_idx+1, sticky="nsew")
+                entry.grid(row=row_idx, column=col_idx+1, sticky="nsew", padx=1, pady=1)
                 if col_name in ["ID", "STATUS"]:
                     row_widgets[col_name] = entry
                 else:
@@ -965,37 +944,46 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             apply_btn = tk.Button(
                 scroll_frame,
                 text="✅",
-                bg="green",
+                bg="#22c55e",  # soft green
                 fg="white",
+                disabledforeground="#383838",
                 width=6,
                 font=("Arial", 10, "bold"),
                 command=make_apply_callback(),
-                state="disabled" if is_active else "normal"
+                state="disabled" if is_active else "normal",
+                relief="flat"
             )
+
             apply_btn.grid(row=row_idx, column=action_col, sticky="nsew")
 
             stop_btn = tk.Button(
                 scroll_frame,
                 text="⛔",
-                bg="red",
+                bg="#ef4444",  # soft red
                 fg="white",
+                disabledforeground="#383838",
                 width=6,
                 font=("Arial", 10, "bold"),
                 command=make_stop_callback(),
-                state="disabled" if is_inactive else "normal"
+                state="disabled" if is_inactive else "normal",
+                relief="flat"
             )
+
             stop_btn.grid(row=row_idx, column=action_col + 1, sticky="nsew")
 
             delete_btn = tk.Button(
                 scroll_frame,
                 text="🗑️",
-                bg="gray",
+                bg="#848688",  # gray
                 fg="white",
+                disabledforeground="#383838",
                 width=6,
                 font=("Arial", 10, "bold"),
                 command=make_delete_callback(),
-                state="disabled" if is_active else "normal"
+                state="disabled" if is_active else "normal",
+                relief="flat"
             )
+
             delete_btn.grid(row=row_idx, column=action_col + 2, sticky="nsew")
 
             # Store the button references
@@ -1038,7 +1026,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     
         # Update the status label text
         if total == 0:
-            status_label.config(text="No strategies available", fg="gray")
+            status_label.config(text="No strategies available", fg="black")
         else:
             status_label.config(text=f"📈 {active} / {total} strategies active", fg="green" if active > 0 else "red")
 
@@ -1098,33 +1086,104 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     # Attach action buttons
     for act in TABLE_ACTIONS:
         if act == "New Table":
-            btn = tk.Button(action_btns, text=act, command=lambda: open_create_table_popup(win, workspace_id, user_id, lambda: refresh_tables(table_var.get())))
+            btn = tk.Button(
+                action_btns, text=act,
+                command=lambda: open_create_table_popup(win, workspace_id, user_id, lambda: refresh_tables(table_var.get())),
+                bg="#2563eb", fg="white",
+                activebackground="#1d4ed8", activeforeground="white",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
         elif act == "Set Default":
-            btn = tk.Button(action_btns, text=act, command=lambda: set_default_table(table_var.get()))
+            btn = tk.Button(
+                action_btns, text=act,
+                command=lambda: set_default_table(table_var.get()),
+                bg="#6b7280", fg="white",
+                activebackground="#4b5563", activeforeground="white",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
         elif act == "Edit Table":
-            btn = tk.Button(action_btns, text=act, command=lambda: open_edit_table_popup(win, workspace_id, user_id, table_var.get(), refresh_tables))
+            btn = tk.Button(
+                action_btns, text=act,
+                command=lambda: open_edit_table_popup(win, workspace_id, user_id, table_var.get(), refresh_tables),
+                bg="#0ea5e9", fg="white",
+                activebackground="#0284c7", activeforeground="white",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
         elif act == "Add Row":
-            btn = tk.Button(action_btns, text=act, command=lambda: handle_add_row(user_id, workspace_id, table_var.get(), refresh_tables))
+            btn = tk.Button(
+                action_btns, text=act,
+                command=lambda: handle_add_row(user_id, workspace_id, table_var.get(), refresh_tables),
+                bg="#22c55e", fg="white",
+                activebackground="#16a34a", activeforeground="white",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
         elif act == "Start All":
-            btn = tk.Button(action_btns, text=act, command=handle_start_all, bg="green", fg="white")
+            btn = tk.Button(
+                action_btns, text=act,
+                command=handle_start_all,
+                bg="#10b981", fg="white",
+                activebackground="#059669", activeforeground="white",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
         elif act == "Stop All":
-            btn = tk.Button(action_btns, text=act, command=handle_stop_all, bg="red", fg="white")
+            btn = tk.Button(
+                action_btns, text=act,
+                command=handle_stop_all,
+                bg="#ef4444", fg="white",
+                activebackground="#dc2626", activeforeground="white",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
         else:
-            btn = tk.Button(action_btns, text=act)
-        btn.pack(side="left", padx=5)
+            btn = tk.Button(
+                action_btns, text=act,
+                bg="#6b7280", fg="white",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
+        btn.pack(side="left", padx=5, pady=2)
+
 
     def back():
-        on_workspace_close() # Use the consolidated close function
-    
+        cleanup_window(win) 
+        if master_win:
+            master_win.deiconify()
+            master_win.lift()
+            master_win.focus_force()
+ 
     # Add "Back to Workspaces" after "Stop All"
     back_btn = tk.Button(action_btns, text="Back to Workspaces", command=back,
-                        bg="#f44336", fg="white", font=("Arial", 12, "bold"))
+                        bg="#f44336", fg="white", font=("Arial", 10, "bold"),bd=0, padx=12, pady=6)
     back_btn.pack(side="left", padx=5)
 
     right_buttons = tk.Frame(header)
     right_buttons.pack(side="right")
 
-    tk.Button(right_buttons, text="Exit Fullscreen", command=exit_fullscreen).pack(side="left")
+    tk.Button(right_buttons,
+                          text="Exit Fullscreen",
+                          command=exit_fullscreen,
+                          bg="#BBB5B5",
+                          fg="white",
+                          font=("Arial", 10, "bold"),
+                          relief="flat",
+                          borderwidth=0,
+                          highlightthickness=2,
+                          highlightbackground="#9C9898",
+                          highlightcolor="#808080",
+                          cursor="hand2",bd=0, padx=12, pady=6
+                         ).pack(side="left")
 
          # === STATUS BAR ===
     status_frame = tk.Frame(win, bg=bg_color)
@@ -1136,5 +1195,4 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     refresh_tables()
 
-    # REMOVE THIS LINE: win.mainloop()
     return win
