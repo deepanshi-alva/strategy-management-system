@@ -1,5 +1,7 @@
 import tkinter as tk
-from tkinter import simpledialog, messagebox, Toplevel
+from tkinter import simpledialog, messagebox, Toplevel, filedialog
+import json
+import os
 import db_handler
 import ui_login
 from ui_workspace_view import open_workspace_layout
@@ -35,14 +37,38 @@ def workspace_window(email):
             center_window(win)
 
     def logout():
-        if win.winfo_exists(): # Check if main window still exists before destroying
+        global open_workspace_windows
+
+        workspace_ids_to_destroy = list(open_workspace_windows.keys()) 
+        for ws_id in workspace_ids_to_destroy:
+            if ws_id in open_workspace_windows:
+                win_to_destroy = open_workspace_windows[ws_id]
+                try:
+                    if win_to_destroy.winfo_exists():
+                        win_to_destroy.destroy()
+                    else:
+                        print(f"DEBUG: Workspace window ID {ws_id} already destroyed (stale reference).")
+                except Exception as e:
+                    print(f"ERROR: Exception while destroying workspace window {ws_id}: {e}")
+                
+                if ws_id in open_workspace_windows:
+                    del open_workspace_windows[ws_id]
+        
+        if win.winfo_exists():
+            print("DEBUG: Destroying main workspace manager window.")
             cleanup_window(win)
             win.destroy()
+        else:
+            print("DEBUG: Main workspace manager window already destroyed.")
+            
+        open_workspace_windows.clear()
+
         conn = db_handler.sqlite3.connect("users.db")
         cur = conn.cursor()
         cur.execute("DELETE FROM user_session_counters WHERE user_id = ?", (user_id,))
         conn.commit()
         conn.close()
+        print("DEBUG: Database session counter cleared. Opening login window.")
         ui_login.login_window()
 
     def set_default(workspace_id):
@@ -120,6 +146,101 @@ def workspace_window(email):
         new_win.lift()
         new_win.focus_force()
 
+    def export_workspace(workspace_id):
+        workspace = db_handler.get_workspace_by_id(workspace_id)
+        user_id = db_handler.get_user_id(email)
+
+        if not workspace:
+            messagebox.showerror("Error", "Workspace not found.")
+            return
+
+        export_data = {
+            "workspace": {
+                "name": workspace[0],
+                "theme": workspace[1],
+                "emoji": workspace[2]
+            },
+            "tables": []
+        }
+
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+
+        cur.execute("SELECT table_name, schema, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=?",
+                    (user_id, workspace_id))
+        tables = cur.fetchall()
+
+        for table_name, schema_json, physical in tables:
+            cur.execute(f"SELECT * FROM {physical}")
+            rows = cur.fetchall()
+            col_names = [desc[0] for desc in cur.description]
+            export_data["tables"].append({
+                "table_name": table_name,
+                "schema": json.loads(schema_json),
+                "columns": col_names,
+                "rows": rows
+            })
+
+        conn.close()
+
+        filepath = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
+        if not filepath:
+            return
+
+        with open(filepath, "w") as f:
+            json.dump(export_data, f, indent=2)
+
+        messagebox.showinfo("Exported", f"Workspace exported to {os.path.basename(filepath)}")
+
+    def import_workspace_from_file():
+        filepath = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
+        if not filepath:
+            return
+
+        with open(filepath, "r") as f:
+            data = json.load(f)
+
+        # email = db_handler.get_logged_in_email()
+        user_id = db_handler.get_user_id(email)
+
+        ws = data.get("workspace", {})
+        tables = data.get("tables", [])
+
+        if not ws or not tables:
+            messagebox.showerror("Invalid File", "File is missing required workspace or table data.")
+            return
+
+        ws_id = db_handler.create_workspace(user_id, ws["name"], ws["theme"], ws["emoji"])
+
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+
+        for t in tables:
+            name = t["table_name"]
+            schema = t["schema"]
+            physical = f"user_{user_id}_ws_{ws_id}_{name}".replace(" ", "_")
+
+            col_defs = ['"ID" TEXT', '"STRATEGY" TEXT', '"TABLE" TEXT', '"STATUS" TEXT',
+                        '"InstrumentToken" TEXT', '"InstrumentID" TEXT', '"InstrumentName" TEXT']
+            for col in schema:
+                col_defs.append(f'"{col["name"]}" {col["type"]}')
+
+            cur.execute(f"CREATE TABLE IF NOT EXISTS {physical} ({', '.join(col_defs)})")
+            cur.execute("""
+                INSERT INTO user_tables (user_id, workspace_id, table_name, schema, physical_table_name, is_default)
+                VALUES (?, ?, ?, ?, ?, 0)
+            """, (user_id, ws_id, name, json.dumps(schema), physical))
+
+            for row in t["rows"]:
+                placeholders = ",".join("?" for _ in row)
+                quoted_columns = ','.join(f'"{col}"' for col in t["columns"])
+                cur.execute(f"INSERT INTO {physical} ({quoted_columns}) VALUES ({placeholders})", row)
+
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo("Imported", f"Workspace '{ws['name']}' imported successfully!")
+
     def refresh_workspaces():
         if not win.winfo_exists(): 
             return
@@ -152,6 +273,7 @@ def workspace_window(email):
             tk.Button(btn_frame, text="Open", command=lambda i=wid: open_workspace(i, master_win=win)).pack(side="left", padx=5)
             tk.Button(btn_frame, text="Edit", command=lambda i=wid: edit_workspace(i)).pack(side="left", padx=5)
             tk.Button(btn_frame, text="Delete", command=lambda i=wid: delete_workspace(i)).pack(side="left", padx=5)
+            tk.Button(btn_frame, text="Export", command=lambda i=wid: export_workspace(i)).pack(side="left", padx=5)
             
     # NEW FUNCTION: Consolidated popup for creating a new workspace
     def open_create_workspace_popup(parent_win, user_id, refresh_callback):
@@ -405,6 +527,9 @@ def workspace_window(email):
     exit_btn.pack(side="left", padx=10)
     exit_btn.bind("<Enter>", lambda e: exit_btn.config(bg=EXIT_HOVER_BG))
     exit_btn.bind("<Leave>", lambda e: exit_btn.config(bg=EXIT_NORMAL_BG))
+
+    tk.Button(right_buttons, text="Import Workspace", command=import_workspace_from_file,
+          bg="#007bff", fg="white", font=("Arial", 12, "bold")).pack(side="left", padx=10)
 
     # === WORKSPACE AREA ===
     canvas = tk.Canvas(win)

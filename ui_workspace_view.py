@@ -261,7 +261,7 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
         conn = db_handler.sqlite3.connect("users.db")
         cur = conn.cursor()
 
-        # Check for name conflict if changed
+        # Check for name conflict if name is changed
         if new_table_name != old_table_name:
             cur.execute("SELECT 1 FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
                         (user_id, workspace_id, new_table_name))
@@ -270,7 +270,7 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
                 messagebox.showerror("Error", "A table with this name already exists.")
                 return
 
-        # Collect new schema
+        # Collect updated schema
         new_schema = []
         for name, dtype, default, editable in column_entries:
             col_name = name.get().strip().upper()
@@ -289,9 +289,61 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
                 "editable": is_editable
             })
 
-        # Update table
+        # Fetch current schema and physical table name
+        cur.execute("SELECT schema, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
+                    (user_id, workspace_id, old_table_name))
+        old_schema_json, physical_table = cur.fetchone()
+        old_schema = json.loads(old_schema_json)
+        old_col_names = {col['name'] for col in old_schema}
+        new_col_names = {col['name'] for col in new_schema}
+
+        # Detect dropped columns
+        dropped_cols = old_col_names - new_col_names
+        added_cols = new_col_names - old_col_names
+
+        # Recreate table if any column is dropped
+        if dropped_cols:
+            print(f"⚠️ Rebuilding table {physical_table} due to dropped columns: {dropped_cols}")
+
+            # Build list of columns to keep (system + user)
+            system_cols = ["ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"]
+            preserved_cols = system_cols + [col['name'] for col in new_schema]
+
+            temp_table = f"{physical_table}_temp"
+
+            # 1. Rename old table
+            cur.execute(f'ALTER TABLE "{physical_table}" RENAME TO "{temp_table}"')
+
+            # 2. Create new table with updated schema
+            column_defs = [f'"{col}" TEXT' for col in system_cols] + \
+                        [f'"{col["name"]}" {col["type"]}' for col in new_schema]
+            cur.execute(f'CREATE TABLE "{physical_table}" ({", ".join(column_defs)})')
+
+            # 3. Copy common columns from temp to new table
+            common_cols = [col for col in preserved_cols if col not in dropped_cols]
+            common_cols_sql = ", ".join(f'"{col}"' for col in common_cols)
+            cur.execute(f'INSERT INTO "{physical_table}" ({common_cols_sql}) SELECT {common_cols_sql} FROM "{temp_table}"')
+
+            # 4. Drop temp table
+            cur.execute(f'DROP TABLE "{temp_table}"')
+
+        # Add any newly added columns (for safety)
+        for col in new_schema:
+            if col["name"] in added_cols:
+                try:
+                    cur.execute(f'ALTER TABLE "{physical_table}" ADD COLUMN "{col["name"]}" {col["type"]}')
+                except Exception as e:
+                    print(f"⚠️ Column already exists: {col['name']}, skipping...")
+
+                # Set default value for all existing rows
+                if col["default"] != "":
+                    cur.execute(f'UPDATE "{physical_table}" SET "{col["name"]}" = ? WHERE "{col["name"]}" IS NULL',
+                                (col["default"],))
+
+        # Update table metadata
         cur.execute("UPDATE user_tables SET table_name=?, schema=? WHERE user_id=? AND workspace_id=? AND table_name=?",
                     (new_table_name, json.dumps(new_schema), user_id, workspace_id, old_table_name))
+
         conn.commit()
         conn.close()
 
@@ -305,6 +357,13 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
 
         conn = db_handler.sqlite3.connect("users.db")
         cur = conn.cursor()
+        # Fetch physical table name
+        cur.execute("SELECT physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
+                    (user_id, workspace_id, old_table_name))
+        row = cur.fetchone()
+        if row:
+            physical_table = row[0]
+            cur.execute(f'DROP TABLE IF EXISTS "{physical_table}"')
         cur.execute("DELETE FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
                     (user_id, workspace_id, old_table_name))
         conn.commit()
@@ -786,6 +845,17 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             selected_var = tk.IntVar(value=1 if status_value == "ACTIVE" else 0)
             cb_color = "#bbf7d0" if status_value == "ACTIVE" else row_bg
             cb = tk.Checkbutton(scroll_frame, variable=selected_var, bg=cb_color, activebackground=cb_color, bd=0, highlightthickness=0)
+            def on_checkbox_toggle(row_id=row_id, var=selected_var):
+                if var.get():
+                    # Simulate Apply
+                    if "apply_btn" in entry_widgets_by_row_id[row_id]:
+                        entry_widgets_by_row_id[row_id]["apply_btn"].invoke()
+                else:
+                    # Simulate Stop
+                    if "stop_btn" in entry_widgets_by_row_id[row_id]:
+                        entry_widgets_by_row_id[row_id]["stop_btn"].invoke()
+
+            cb.config(command=on_checkbox_toggle)
             cb.grid(row=row_idx, column=0, sticky="nsew")
             row_widgets["SELECTED"] = selected_var
             row_widgets["CHECKBOX_WIDGET"] = cb
@@ -803,7 +873,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 is_editable = col_name in editable_cols
                 entry = tk.Entry(scroll_frame, width=15, disabledforeground="black", justify="center", bg=row_bg, relief="flat")
                 val = row_data[col_idx]
-                entry.insert(0, val)
+                entry.insert(0, "" if val is None else str(val))
 
                 # Apply validation if editable
                 if col_name in editable_cols:
