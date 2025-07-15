@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 from db_handler import verify_user
-# import admin_create_user
+import admin_create_user
 import ui_workspace
 import db_handler
 from window_utils import center_window, _perform_centering_on_restore, on_configure, cleanup_window
@@ -116,6 +116,6 @@ def login_window():
             messagebox.showerror("Failed", "Invalid credentials")
 
     tk.Button(frame, text="Login", width=20, command=login, bg="#2196F3", fg="white", font=("Arial", 10, "bold")).pack(pady=10)
-    # tk.Button(frame, text="Go to Signup", width=20, bg="#07365C", fg="white", font=("Arial", 10, "bold","underline"), command=lambda:[cleanup_window(win), win.destroy(), admin_create_user.signup_window()]).pack()
+    tk.Button(frame, text="Go to Signup", width=20, bg="#07365C", fg="white", font=("Arial", 10, "bold","underline"), command=lambda:[cleanup_window(win), win.destroy(), admin_create_user.signup_window()]).pack()
     win.mainloop()
  

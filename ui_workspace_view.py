@@ -6,6 +6,7 @@ from instrument_pop import select_instrument
 from functools import partial
 from tcp_utils import send_tcp_command
 import threading
+from tkinter.filedialog import asksaveasfilename, askopenfilename
 from window_utils import center_window, _perform_centering_on_restore, on_configure, cleanup_window 
 
 def get_next_session_id(user_id):
@@ -26,7 +27,7 @@ def get_next_session_id(user_id):
     return next_id
 
 # Constants
-TABLE_ACTIONS = ["Set Default", "New Table", "Edit Table", "Add Row", "Start All", "Stop All"]
+TABLE_ACTIONS = ["Export Table", "Import Table", "Set Default", "New Table", "Edit Table", "Add Row", "Start All", "Stop All"]
 
 # Entry point
 def create_validator(data_type):
@@ -1153,6 +1154,93 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
         update_table_display(table_var.get())
 
+    def export_table_as_json():
+        table_name = table_var.get()
+        if not table_name:
+            messagebox.showerror("Error", "Please select a table to export.")
+            return
+        print("this is the table name", table_name)
+
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+        cur.execute("SELECT schema, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
+                    (user_id, workspace_id, table_name))
+        result = cur.fetchone()
+        if not result:
+            messagebox.showerror("Error", "Table not found.")
+            return
+        schema_json, physical_table = result
+        schema = json.loads(schema_json)
+
+        cur.execute(f"SELECT * FROM {physical_table}")
+        rows = cur.fetchall()
+        col_names = [desc[0] for desc in cur.description]
+
+        data_rows = []
+        for row in rows:
+            row_dict = dict(zip(col_names, row))
+            row_dict["STATUS"] = "INACTIVE"  # Force status to INACTIVE
+            data_rows.append(row_dict)
+
+        export_data = {
+            "table_name": table_name,
+            "schema": schema,
+            "rows": data_rows
+        }
+
+        save_path = asksaveasfilename(defaultextension=".json", filetypes=[("JSON Files", "*.json")])
+        if save_path:
+            with open(save_path, "w") as f:
+                json.dump(export_data, f, indent=4)
+            messagebox.showinfo("Export Success", f"Table '{table_name}' exported successfully!")
+        conn.close()
+
+    def import_table_from_json():
+        file_path = askopenfilename(filetypes=[("JSON Files", "*.json")])
+        if not file_path:
+            return
+
+        with open(file_path, "r") as f:
+            data = json.load(f)
+
+        imported_table_name = data.get("table_name", "").upper()
+        schema = data.get("schema", [])
+        rows = data.get("rows", [])
+
+        if not imported_table_name or not schema:
+            messagebox.showerror("Import Error", "Invalid or corrupt JSON file.")
+            return
+
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+
+        physical_table_name = f"user_{user_id}_ws_{workspace_id}_{imported_table_name}".replace(" ", "_")
+
+        # Ensure table creation
+        column_defs = ['"ID" TEXT', '"STRATEGY" TEXT', '"TABLE" TEXT', '"STATUS" TEXT',
+                    '"InstrumentToken" TEXT', '"InstrumentID" TEXT', '"InstrumentName" TEXT']
+        for col in schema:
+            column_defs.append(f'"{col["name"]}" {col["type"]}')
+
+        cur.execute(f"CREATE TABLE IF NOT EXISTS {physical_table_name} ({', '.join(column_defs)})")
+
+        # Insert metadata
+        cur.execute("INSERT OR IGNORE INTO user_tables (user_id, workspace_id, table_name, schema, physical_table_name, is_default) VALUES (?, ?, ?, ?, ?, 0)",
+                    (user_id, workspace_id, imported_table_name, json.dumps(schema), physical_table_name))
+
+        for row in rows:
+            row["STATUS"] = "INACTIVE"
+            columns = list(row.keys())
+            placeholders = ", ".join("?" for _ in columns)
+            quoted_columns = ", ".join(f'"{col}"' for col in columns)
+            cur.execute(f'INSERT INTO {physical_table_name} ({quoted_columns}) VALUES ({placeholders})',
+                        [row[col] for col in columns])
+
+        conn.commit()
+        conn.close()
+        messagebox.showinfo("Import Success", f"Table '{imported_table_name}' imported successfully!")
+        refresh_tables(imported_table_name)
+
     # Attach action buttons
     for act in TABLE_ACTIONS:
         if act == "New Table":
@@ -1171,6 +1259,24 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 command=lambda: set_default_table(table_var.get()),
                 bg="#6b7280", fg="white",
                 activebackground="#4b5563", activeforeground="white",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
+        elif act == "Export Table":
+            btn = tk.Button(
+                action_btns, text=act,
+                command=export_table_as_json,
+                bg="#F2D2BD", fg="black",
+                font=("Arial", 10, "bold"),
+                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+            )
+
+        elif act == "Import Table":
+            btn = tk.Button(
+                action_btns, text=act,
+                command=import_table_from_json,
+                bg="#AFE1AF", fg="black",
                 font=("Arial", 10, "bold"),
                 relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
             )
@@ -1224,7 +1330,6 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             )
 
         btn.pack(side="left", padx=5, pady=2)
-
 
     def back():
         cleanup_window(win) 
