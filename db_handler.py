@@ -52,12 +52,12 @@ def init_db():
         )
     """)
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS user_session_counters (
-            user_id INTEGER PRIMARY KEY,
-            current_id INTEGER
-        );
-    """)
+    # c.execute("""
+    #     CREATE TABLE IF NOT EXISTS user_session_counters (
+    #         user_id INTEGER PRIMARY KEY,
+    #         current_id INTEGER
+    #     );
+    # """)
 
     conn.commit()
     conn.close()

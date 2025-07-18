@@ -3,28 +3,18 @@ from tkinter import ttk, messagebox
 import db_handler
 import json
 from instrument_pop import select_instrument
-from functools import partial
+# from functools import partial
 from tcp_utils import send_tcp_command
 import threading
 from tkinter.filedialog import asksaveasfilename, askopenfilename
-from window_utils import center_window, _perform_centering_on_restore, on_configure, cleanup_window 
+from window_utils import center_window, on_configure, cleanup_window 
+import config
 
-def get_next_session_id(user_id):
-    conn = db_handler.sqlite3.connect("users.db")
-    cur = conn.cursor()
+def get_next_session_id():
+    session_id = config.GLOBAL_SESSION_COUNTER
+    config.GLOBAL_SESSION_COUNTER += 1
 
-    # Get current counter
-    cur.execute("SELECT current_id FROM user_session_counters WHERE user_id = ?", (user_id,))
-    row = cur.fetchone()
-    current_id = row[0] if row else 0
-    next_id = current_id + 1
-
-    # Update counter
-    cur.execute("REPLACE INTO user_session_counters (user_id, current_id) VALUES (?, ?)", (user_id, next_id))
-    conn.commit()
-    conn.close()
-
-    return next_id
+    return session_id
 
 # Constants
 TABLE_ACTIONS = ["Export Table", "Import Table", "Set Default", "New Table", "Edit Table", "Add Row", "Start All", "Stop All"]
@@ -395,7 +385,7 @@ def handle_add_row(user_id, workspace_id, table_name, refresh_callback):
         schema = json.loads(result[0])
         physical_table = result[1]
 
-        next_id = get_next_session_id(user_id)
+        next_id = get_next_session_id()
         print("The next global user-based ID is:", next_id)
 
 
@@ -558,11 +548,11 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 if "CHECKBOX_WIDGET" in widgets:
                     widgets["CHECKBOX_WIDGET"].config(bg="#c7f9cc")
                 if "apply_btn" in widgets:
-                    widgets["apply_btn"].config(state="disabled")
+                    widgets["apply_btn"].config(state="disabled", text="Applied", bg="black", fg="white")
                 if "delete_btn" in widgets:
                     widgets["delete_btn"].config(state="disabled")
                 if "stop_btn" in widgets:
-                    widgets["stop_btn"].config(state="normal")
+                    widgets["stop_btn"].config(state="normal", text="Stop", bg="black", fg="white")
 
     def update_row_ui_inactive(row_id):
         widgets = entry_widgets_by_row_id.get(row_id)
@@ -579,13 +569,15 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             if "SELECTED" in widgets:
                 widgets["SELECTED"].set(0)  # Deselect if needed
             if "CHECKBOX_WIDGET" in widgets: 
-                widgets["CHECKBOX_WIDGET"].config(bg=bg_color)
+                row_index = int(widgets["CHECKBOX_WIDGET"].grid_info()["row"])
+                original_row_bg = "#f9fafb" if row_index % 2 == 0 else "#e5e7eb"
+                widgets["CHECKBOX_WIDGET"].config(bg=original_row_bg, activebackground=original_row_bg)
             if "apply_btn" in widgets:
-                widgets["apply_btn"].config(state="normal")
+                widgets["apply_btn"].config(state="normal", text="Apply", bg="black", fg="white")
             if "delete_btn" in widgets:
                 widgets["delete_btn"].config(state="normal")
             if "stop_btn" in widgets:
-                widgets["stop_btn"].config(state="disabled")
+                widgets["stop_btn"].config(state="disabled", text="Stopped", bg="black", fg="white")
 
     def handle_start_all():
         table_name = table_var.get()
@@ -753,6 +745,32 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                     font=("Arial", 14), bg=bg_color, fg=fg_color).pack(expand=True)
             return
         
+        # Safely get the physical table name
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+        cur.execute("SELECT physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
+                    (user_id, workspace_id, table_name))
+        result = cur.fetchone()
+        if not result:
+            conn.close()
+            tk.Label(content_frame, text="Error: Table not found.", font=("Arial", 14), bg=bg_color, fg="red").pack()
+            return
+        physical_table = result[0]
+        conn.close()
+        # Now safely read the data from that table
+        try:
+            conn = db_handler.sqlite3.connect("users.db")
+            cur = conn.cursor()
+            print("DEBUG: physical_table =", physical_table)
+            cur.execute(f'SELECT * FROM "{physical_table}"')  # Correct identifier quoting
+            rows = cur.fetchall()
+            col_names = [desc[0] for desc in cur.description]
+            conn.close()
+        except Exception as e:
+            tk.Label(content_frame, text=f"Error reading data: {e}", font=("Arial", 12), bg=bg_color, fg="red").pack()
+            print("EXCEPTION:", e)
+            return
+    
         # Get physical table name
         conn = db_handler.sqlite3.connect("users.db")
         cur = conn.cursor()
@@ -809,12 +827,36 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         editable_cols = set(col["name"] for col in schema_data if col["editable"])
         col_indices = {name: idx for idx, name in enumerate(col_names)}
 
+        tk.Label(scroll_frame, text="Select", font=("Arial", 10, "bold"),
+         bg="#1f2937", fg="white", borderwidth=1, relief="solid", width=10).grid(row=0, column=0, sticky="nsew")
+
         # Draw header row with color-coded labels
+        static_columns = {"ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"}
+
         for col_idx, col_name in enumerate(col_names):
+            is_static = col_name in static_columns
             is_editable = col_name in editable_cols
-            header_color = "yellow" if is_editable else "blue"
-            tk.Label(scroll_frame, text=col_name, font=("Arial", 10, "bold"),
-                    fg=header_color, bg="#1f2937", borderwidth=1, relief="solid", width=15).grid(row=0, column=col_idx, sticky="nsew")
+
+            if is_static:
+                header_bg = "#2e6291"  # Deep blue
+                header_fg = "white"
+            elif is_editable:
+                header_bg = "#489ad1"  # Yellowish blue
+                header_fg = "black"
+            else:
+                header_bg = "#3b82f6"  # Normal blue
+                header_fg = "white"
+
+            tk.Label(
+                scroll_frame,
+                text=col_name,
+                font=("Arial", 10, "bold"),
+                fg=header_fg,
+                bg=header_bg,
+                borderwidth=1,
+                relief="solid",
+                width=15
+            ).grid(row=0, column=col_idx + 1, sticky="nsew")  # +1 to skip Select
 
         # Add headers for action buttons
         tk.Label(scroll_frame, text="Apply", font=("Arial", 10, "bold"),
@@ -825,6 +867,23 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
         tk.Label(scroll_frame, text="Delete", font=("Arial", 10, "bold"),
          bg="#d9d9d9", borderwidth=1, relief="solid", width=10).grid(row=0, column=len(col_names)+3, sticky="nsew")
+        
+        if not rows:
+            print("✅ No rows found. Showing message.")
+            msg_label = tk.Label(
+                scroll_frame,
+                text="No rows found. Click 'Add Row' to insert one.",
+                font=("Arial", 13, "italic"),
+                bg=bg_color,
+                fg="gray"
+            )
+            msg_label.grid(
+                row=1,
+                column=0,
+                columnspan=len(col_names) + 4,  # Select + data + Apply/Stop/Delete
+                pady=30,
+                sticky="nsew"
+            )
 
         # Fetch schema to identify editable fields
         cur = db_handler.sqlite3.connect("users.db").cursor()
@@ -845,7 +904,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             status_value = str(row_data[col_indices.get("STATUS", -1)]).upper()
             selected_var = tk.IntVar(value=1 if status_value == "ACTIVE" else 0)
             cb_color = "#bbf7d0" if status_value == "ACTIVE" else row_bg
-            cb = tk.Checkbutton(scroll_frame, variable=selected_var, bg=cb_color, activebackground=cb_color, bd=0, highlightthickness=0)
+            cb = tk.Checkbutton(scroll_frame, variable=selected_var, bg=cb_color, activebackground=cb_color, bd=0, highlightthickness=0, relief="flat")
             def on_checkbox_toggle(row_id=row_id, var=selected_var):
                 if var.get():
                     # Simulate Apply
@@ -857,7 +916,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                         entry_widgets_by_row_id[row_id]["stop_btn"].invoke()
 
             cb.config(command=on_checkbox_toggle)
-            cb.grid(row=row_idx, column=0, sticky="nsew")
+            cb.grid(row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
             row_widgets["SELECTED"] = selected_var
             row_widgets["CHECKBOX_WIDGET"] = cb
             entry_widgets_by_row_id[row_id] = row_widgets
@@ -1014,8 +1073,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
             apply_btn = tk.Button(
                 scroll_frame,
-                text="✅",
-                bg="#22c55e",  # soft green
+                text="Apply" if is_inactive else "Applied",
+                bg="#090a0a",  # soft green
                 fg="white",
                 disabledforeground="#383838",
                 width=6,
@@ -1029,8 +1088,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
             stop_btn = tk.Button(
                 scroll_frame,
-                text="⛔",
-                bg="#ef4444",  # soft red
+                text="Stop" if is_active else "Stopped",
+                bg="#090a0a",  # soft red
                 fg="white",
                 disabledforeground="#383838",
                 width=6,
@@ -1229,7 +1288,12 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                     (user_id, workspace_id, imported_table_name, json.dumps(schema), physical_table_name))
 
         for row in rows:
+            next_id = get_next_session_id()
+            print("this is the next session id", next_id)
+            row["ID"] = str(next_id)
+            row["STRATEGY"] = f"{imported_table_name}_{next_id}"
             row["STATUS"] = "INACTIVE"
+            row["TABLE"] = imported_table_name.upper()
             columns = list(row.keys())
             placeholders = ", ".join("?" for _ in columns)
             quoted_columns = ", ".join(f'"{col}"' for col in columns)

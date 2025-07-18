@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox
 from db_handler import add_user
 import ui_login
-from window_utils import center_window, _perform_centering_on_restore, on_configure, cleanup_window
+from window_utils import center_window, on_configure, cleanup_window
 
 def signup_window():
     win = tk.Tk()

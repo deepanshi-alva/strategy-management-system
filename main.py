@@ -15,6 +15,7 @@ def resource_path(relative_path):
 
 def preload_instruments():
     db_path = resource_path("20250606DB.db3")
+    print("this is the file path of db3",db_path)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute("SELECT DISTINCT Name, Symbol, Token FROM ResultSet")

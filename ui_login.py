@@ -4,14 +4,16 @@ from db_handler import verify_user
 import admin_create_user
 import ui_workspace
 import db_handler
-from window_utils import center_window, _perform_centering_on_restore, on_configure, cleanup_window
+import config
+from window_utils import center_window, on_configure, cleanup_window
 
 def reinitialize_session_ids(user_id):
+    print("reinitialize_session_ids has been called")
+
     import sqlite3
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
 
-    all_rows = []
     current_id = 1  # Start fresh for this user
 
     # Step 1: Get all workspaces for the user ordered by creation time
@@ -25,40 +27,57 @@ def reinitialize_session_ids(user_id):
     # Step 2: For each workspace, get associated tables
     for workspace_id in workspaces:
         cur.execute("""
-            SELECT table_name, physical_table_name
+            SELECT physical_table_name
             FROM user_tables
             WHERE user_id = ? AND workspace_id = ?
         """, (user_id, workspace_id))
         tables = cur.fetchall()
 
-        # Step 3: For each table, fetch its rows
-        for table_name, physical_table in tables:
+        print("These are the tables: ", tables)
+
+        for physical_table_tuple in tables:
+            physical_table = physical_table_tuple[0]
+            print("Processing table:", physical_table)
             try:
+                # Fetch all existing IDs
                 cur.execute(f"SELECT ID FROM {physical_table}")
                 rows = cur.fetchall()
+                print("Existing rows:", rows)
 
-                # Step 4: Reassign new IDs using the running counter
+                # Step 3: First pass - store new ID mapping
+                id_map = {}
                 for row in rows:
                     old_id = row[0]
+                    id_map[old_id] = current_id
+                    current_id += 1
+
+                # Step 4: Apply updates using the stored mapping
+                for old_id, new_id in id_map.items():
                     cur.execute(f"""
                         UPDATE {physical_table}
                         SET ID = ?
                         WHERE ID = ?
-                    """, (current_id, old_id))
-                    current_id += 1
+                    """, (new_id + 1000000, old_id))  # Use offset to prevent conflicts
+
+                # Step 5: Normalize the IDs back to expected values
+                for old_id, new_id in id_map.items():
+                    cur.execute(f"""
+                        UPDATE {physical_table}
+                        SET ID = ?
+                        WHERE ID = ?
+                    """, (new_id, new_id + 1000000))
+
             except sqlite3.Error as e:
                 print(f"Error processing table {physical_table}: {e}")
                 continue
 
-    # Step 5: Update user's session counter
-    cur.execute("""
-        REPLACE INTO user_session_counters (user_id, current_id)
-        VALUES (?, ?)
-    """, (user_id, current_id - 1))  # last assigned ID
+    # Final: Set global session counter
+    print("Final session counter value:", current_id)
+    config.GLOBAL_SESSION_COUNTER = current_id
 
     conn.commit()
     conn.close()
-
+    
 def login_window():
     """Creates and displays the login window."""
     win = tk.Tk()
@@ -118,4 +137,3 @@ def login_window():
     tk.Button(frame, text="Login", width=20, command=login, bg="#2196F3", fg="white", font=("Arial", 10, "bold")).pack(pady=10)
     tk.Button(frame, text="Go to Signup", width=20, bg="#07365C", fg="white", font=("Arial", 10, "bold","underline"), command=lambda:[cleanup_window(win), win.destroy(), admin_create_user.signup_window()]).pack()
     win.mainloop()
- 
