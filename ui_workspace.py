@@ -1,11 +1,9 @@
 import tkinter as tk
 from tkinter import messagebox
-# import json
-# import os
 import db_handler
 import ui_login
 from ui_workspace_view import open_workspace_layout
-from window_utils import center_window, on_configure, cleanup_window 
+from window_utils import center_window, cleanup_window 
 
 open_workspace_windows = {}
 
@@ -132,7 +130,6 @@ def workspace_window(email):
             on_close_callback=workspace_close_callback
         )
         open_workspace_windows[workspace_id] = new_win
-        # new_win.protocol("WM_DELETE_WINDOW", lambda: workspace_close_callback(workspace_id))
         new_win.deiconify()
         new_win.lift()
         new_win.focus_force()
