@@ -388,10 +388,6 @@ def handle_add_row(user_id, workspace_id, table_name, refresh_callback):
         next_id = get_next_session_id()
         print("The next global user-based ID is:", next_id)
 
-
-        print("The next unique ID for the new row is:", next_id) # For debugging/verification
-        # --- END OF CRITICAL CHANGE FOR ID GENERATION ---
-
         # Create new row with the unique ID
         new_row = {
             "ID": str(next_id),  # Use the newly generated unique ID
@@ -756,42 +752,17 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             tk.Label(content_frame, text="Error: Table not found.", font=("Arial", 14), bg=bg_color, fg="red").pack()
             return
         physical_table = result[0]
-        conn.close()
         # Now safely read the data from that table
         try:
-            conn = db_handler.sqlite3.connect("users.db")
-            cur = conn.cursor()
             print("DEBUG: physical_table =", physical_table)
             cur.execute(f'SELECT * FROM "{physical_table}"')  # Correct identifier quoting
             rows = cur.fetchall()
             col_names = [desc[0] for desc in cur.description]
             conn.close()
         except Exception as e:
+            conn.close()
             tk.Label(content_frame, text=f"Error reading data: {e}", font=("Arial", 12), bg=bg_color, fg="red").pack()
             print("EXCEPTION:", e)
-            return
-    
-        # Get physical table name
-        conn = db_handler.sqlite3.connect("users.db")
-        cur = conn.cursor()
-        cur.execute("SELECT physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
-                    (user_id, workspace_id, table_name))
-        result = cur.fetchone()
-        if not result:
-            conn.close()
-            tk.Label(content_frame, text="Error loading table.", font=("Arial", 12), bg=bg_color, fg="red").pack()
-            return
-
-        physical_table = result[0]
-
-        try:
-            cur.execute(f"SELECT * FROM {physical_table}")
-            rows = cur.fetchall()
-            col_names = [desc[0] for desc in cur.description]
-            conn.close()
-        except Exception as e:
-            conn.close()
-            tk.Label(content_frame, text=f"Error reading data: {e}", font=("Arial", 12), bg=bg_color, fg="red").pack()
             return
 
         # Header
@@ -817,7 +788,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
         table_canvas.pack(side="left", fill="both", expand=True)
 
-         # Fetch schema to identify editable fields
+        # Fetch schema to identify editable fields
         cur = db_handler.sqlite3.connect("users.db").cursor()
         cur.execute("SELECT schema FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?", 
                     (user_id, workspace_id, table_name))
@@ -884,16 +855,6 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 pady=30,
                 sticky="nsew"
             )
-
-        # Fetch schema to identify editable fields
-        cur = db_handler.sqlite3.connect("users.db").cursor()
-        cur.execute("SELECT schema FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?", 
-                    (user_id, workspace_id, table_name))
-        schema_data = json.loads(cur.fetchone()[0])
-        conn.close()
-
-        editable_cols = set(col["name"] for col in schema_data if col["editable"])
-        col_indices = {name: idx for idx, name in enumerate(col_names)}
 
         for row_idx, row_data in enumerate(rows, start=1):
             row_bg = "#f9fafb" if row_idx % 2 == 0 else "#e5e7eb"
