@@ -17,7 +17,7 @@ def get_next_session_id():
     return session_id
 
 # Constants
-TABLE_ACTIONS = ["Export Table", "Import Table", "Set Default", "New Table", "Edit Table", "Add Row", "Start All", "Stop All"]
+TABLE_ACTIONS = ["Export Schema", "Import Schema", "Export Table", "Import Table", "Set Default", "New Table", "Edit Table", "Add Row", "Start All", "Stop All"]
 
 # Entry point
 def create_validator(data_type):
@@ -51,6 +51,17 @@ def open_create_table_popup(parent, workspace_id, user_id, refresh_callback):
     columns_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
     column_entries = []
+
+    header_frame = tk.Frame(columns_frame)
+    header_frame.pack(fill="x", pady=2)
+
+    # Adjusted widths and padding for better alignment with the image
+    tk.Label(header_frame, text="Column Name", font=("Arial", 9, "bold"), width=15).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Type", font=("Arial", 9, "bold"), width=8).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Default Value", font=("Arial", 9, "bold"), width=15).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Editable", font=("Arial", 9, "bold"), width=7).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Subscription", font=("Arial", 9, "bold"), width=10).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Remove", font=("Arial", 9, "bold"), width=7, anchor="w").pack(side="left", padx=5)
 
     def add_column():
         row = tk.Frame(columns_frame)
@@ -94,15 +105,21 @@ def open_create_table_popup(parent, workspace_id, user_id, refresh_callback):
         # --- Editable Checkbox with Label ---
         editable = tk.IntVar()
         edit_frame = tk.Frame(row)
-        edit_check = tk.Checkbutton(edit_frame, text="Editable", variable=editable)
-        edit_check.pack()
+        edit_check = tk.Checkbutton(edit_frame, variable=editable) # Removed text="Editable"
+        edit_check.pack(padx=25) # Add padx to center the checkbox within its frame
         edit_frame.pack(side="left", padx=5)
 
-        # --- Remove Button ---
-        del_btn = tk.Button(row, text="Remove", command=lambda: remove_column(row))
-        del_btn.pack(side="right")
+        subscription = tk.IntVar()
+        sub_frame = tk.Frame(row)
+        sub_check = tk.Checkbutton(sub_frame, variable=subscription)
+        sub_check.pack(padx=25)  # Add padx to center the checkbox within its frame
+        sub_frame.pack(side="left", padx=5)
 
-        column_entries.append((name, dtype, default, editable))
+        # --- Remove Button ---
+        del_btn = tk.Button(row, text="🗑", command=lambda: remove_column(row), relief="flat",font=(10))
+        del_btn.pack(side="left")
+
+        column_entries.append((name, dtype, default, editable, subscription))
 
     def remove_column(row):
         for i, (n, t, d, e) in enumerate(column_entries):
@@ -120,11 +137,12 @@ def open_create_table_popup(parent, workspace_id, user_id, refresh_callback):
             return
 
         schema = []
-        for name, dtype, default, editable in column_entries:
+        for name, dtype, default, editable, subscription in column_entries:
             col_name = name.get().strip().upper()
             col_type = dtype.get()
             col_default = default.get().strip()
             is_editable = bool(editable.get())
+            is_subscription = bool(subscription.get())
 
             if not col_name:
                 messagebox.showerror("Error", "Column name is required")
@@ -134,7 +152,8 @@ def open_create_table_popup(parent, workspace_id, user_id, refresh_callback):
                 "name": col_name,
                 "type": col_type,
                 "default": col_default,
-                "editable": is_editable
+                "editable": is_editable,
+                "subscription": is_subscription
             })
 
         conn = db_handler.sqlite3.connect("users.db")
@@ -199,7 +218,18 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
 
     column_entries = []
 
-    def add_column_with_values(col_name="", col_type="INTEGER", col_default="", col_editable=False):
+    header_frame = tk.Frame(columns_frame)
+    header_frame.pack(fill="x", pady=2)
+
+    # Adjusted widths and padding for better alignment with the image
+    tk.Label(header_frame, text="Column Name", font=("Arial", 9, "bold"), width=15).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Type", font=("Arial", 9, "bold"), width=8).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Default Value", font=("Arial", 9, "bold"), width=15).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Editable", font=("Arial", 9, "bold"), width=7).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Subscription", font=("Arial", 9, "bold"), width=10).pack(side="left", padx=5, anchor="w")
+    tk.Label(header_frame, text="Remove", font=("Arial", 9, "bold"), width=7, anchor="w").pack(side="left", padx=5)
+
+    def add_column_with_values(col_name="", col_type="INTEGER", col_default="", col_editable=False, col_subscription=False):
         row = tk.Frame(columns_frame)
         row.pack(fill="x", pady=2)
 
@@ -217,14 +247,20 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
 
         editable = tk.IntVar(value=1 if col_editable else 0)
         edit_frame = tk.Frame(row)
-        edit_check = tk.Checkbutton(edit_frame, text="Editable", variable=editable)
-        edit_check.pack()
+        edit_check = tk.Checkbutton(edit_frame, variable=editable) # Removed text="Editable"
+        edit_check.pack(padx=25) # Add padx to center the checkbox within its frame
         edit_frame.pack(side="left", padx=5)
 
-        del_btn = tk.Button(row, text="Remove", command=lambda: remove_column(row))
-        del_btn.pack(side="right")
+        subscription = tk.IntVar(value=1 if col_subscription else 0)
+        sub_frame = tk.Frame(row)
+        sub_check = tk.Checkbutton(sub_frame, variable=subscription)
+        sub_check.pack(padx=25)  # Add padx to center the checkbox within its frame
+        sub_frame.pack(side="left", padx=5)
 
-        column_entries.append((name, dtype, default, editable))
+        del_btn = tk.Button(row, text="🗑", command=lambda: remove_column(row), relief="flat",font=(10))
+        del_btn.pack(side="left")
+
+        column_entries.append((name, dtype, default, editable, subscription))
 
     def remove_column(row):
         for i, (n, t, d, e) in enumerate(column_entries):
@@ -238,7 +274,8 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
             col_name=col["name"],
             col_type=col["type"],
             col_default=col["default"],
-            col_editable=col["editable"]
+            col_editable=col["editable"],
+            col_subscription=col["subscription"]
         )
 
     tk.Button(popup, text="Add Column", command=lambda: add_column_with_values()).pack(pady=5)
@@ -263,11 +300,12 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
 
         # Collect updated schema
         new_schema = []
-        for name, dtype, default, editable in column_entries:
+        for name, dtype, default, editable, subscription in column_entries:
             col_name = name.get().strip().upper()
             col_type = dtype.get()
             col_default = default.get().strip()
             is_editable = bool(editable.get())
+            is_subscription = bool(subscription.get())
 
             if not col_name:
                 messagebox.showerror("Error", "Column name cannot be empty.")
@@ -277,7 +315,8 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
                 "name": col_name,
                 "type": col_type,
                 "default": col_default,
-                "editable": is_editable
+                "editable": is_editable,
+                "subscription" : is_subscription
             })
 
         # Fetch current schema and physical table name
