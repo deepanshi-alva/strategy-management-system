@@ -10,6 +10,8 @@ from tkinter.filedialog import asksaveasfilename, askopenfilename
 from window_utils import center_window, on_configure, cleanup_window 
 import config
 
+table_actions_popup = None  # Add at module level
+
 def get_next_session_id():
     session_id = config.GLOBAL_SESSION_COUNTER
     config.GLOBAL_SESSION_COUNTER += 1
@@ -35,19 +37,17 @@ def create_validator(data_type):
 
 # Function to create a new table schema
 def open_create_table_popup(parent, workspace_id, user_id, refresh_callback):
-    popup = tk.Toplevel(parent)
-    popup.title("Create New Table Schema")
-    popup.geometry("600x500")
+    container = parent
 
-    tk.Label(popup, text="\u26A0 Column Name Guidelines:", font=("Arial", 10, "bold"), fg="darkred").pack(anchor="w", padx=10)
-    tk.Label(popup, text="- Avoid spaces (use underscores)\n- Avoid special characters\n- Use uppercase\n- STATUS will be added automatically",
+    tk.Label(container, text="\u26A0 Column Name Guidelines:", font=("Arial", 10, "bold"), fg="darkred").pack(anchor="w", padx=10)
+    tk.Label(container, text="- Avoid spaces (use underscores)\n- Avoid special characters\n- Use uppercase\n- STATUS will be added automatically",
              justify="left", font=("Arial", 9)).pack(anchor="w", padx=20)
 
-    tk.Label(popup, text="Table Name:").pack(anchor="w", padx=10, pady=(10, 0))
-    table_name_entry = tk.Entry(popup)
+    tk.Label(container, text="Table Name:").pack(anchor="w", padx=10, pady=(10, 0))
+    table_name_entry = tk.Entry(container)
     table_name_entry.pack(fill="x", padx=10)
 
-    columns_frame = tk.Frame(popup, bd=2, relief="sunken")
+    columns_frame = tk.Frame(container, bd=2, relief="sunken")
     columns_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
     column_entries = []
@@ -176,13 +176,17 @@ def open_create_table_popup(parent, workspace_id, user_id, refresh_callback):
         """, (user_id, workspace_id, table_name, json.dumps(schema), physical_table_name))
 
         conn.commit()
+        messagebox.showinfo("Success", f"Table '{table_name}' created successfully!")
+        refresh_callback()
+        # Find the parent Toplevel window and close it
+        current_widget = container
+        while current_widget.winfo_toplevel() != current_widget:
+            current_widget = current_widget.nametowidget(current_widget.winfo_parent())
+        current_widget.destroy()
         conn.close()
 
-        popup.destroy()
-        refresh_callback()
-
-    tk.Button(popup, text="Add Column", command=add_column).pack(pady=5)
-    tk.Button(popup, text="Create Table", command=create_table, bg="green", fg="white", font=("Arial", 12, "bold")).pack(pady=10)
+    tk.Button(container, text="Add Column", command=add_column).pack(pady=5)
+    tk.Button(container, text="Create Table", command=create_table, bg="green", fg="white", font=("Arial", 12, "bold")).pack(pady=10)
 
 # Function to edit table schema
 def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh_callback):
@@ -200,20 +204,18 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
     schema_data = json.loads(result[0])
     conn.close()
 
-    popup = tk.Toplevel(parent)
-    popup.title(f"Edit Table - {old_table_name}")
-    popup.geometry("600x500")
+    container = parent
 
-    tk.Label(popup, text="\u26A0 Column Name Guidelines:", font=("Arial", 10, "bold"), fg="darkred").pack(anchor="w", padx=10)
-    tk.Label(popup, text="- Avoid spaces (use underscores)\n- Avoid special characters\n- Use uppercase\n- STATUS will be added automatically",
+    tk.Label(container, text="\u26A0 Column Name Guidelines:", font=("Arial", 10, "bold"), fg="darkred").pack(anchor="w", padx=10)
+    tk.Label(container, text="- Avoid spaces (use underscores)\n- Avoid special characters\n- Use uppercase\n- STATUS will be added automatically",
              justify="left", font=("Arial", 9)).pack(anchor="w", padx=20)
 
-    tk.Label(popup, text="Table Name:").pack(anchor="w", padx=10, pady=(10, 0))
-    table_name_entry = tk.Entry(popup)
+    tk.Label(container, text="Table Name:").pack(anchor="w", padx=10, pady=(10, 0))
+    table_name_entry = tk.Entry(container)
     table_name_entry.pack(fill="x", padx=10)
     table_name_entry.insert(0, old_table_name)
 
-    columns_frame = tk.Frame(popup, bd=2, relief="sunken")
+    columns_frame = tk.Frame(container, bd=2, relief="sunken")
     columns_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
     column_entries = []
@@ -278,7 +280,7 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
             col_subscription=col["subscription"]
         )
 
-    tk.Button(popup, text="Add Column", command=lambda: add_column_with_values()).pack(pady=5)
+    tk.Button(container, text="Add Column", command=lambda: add_column_with_values()).pack(pady=5)
 
     def save_changes():
         new_table_name = table_name_entry.get().strip().upper()
@@ -377,8 +379,11 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
         conn.commit()
         conn.close()
 
-        popup.destroy()
+        for widget in container.winfo_children():
+            widget.destroy()
+        open_edit_table_popup(container, workspace_id, user_id, new_table_name, refresh_callback)
         refresh_callback()
+
 
     def delete_table():
         confirm = messagebox.askyesno("Delete Table", f"Are you sure you want to delete '{old_table_name}'?")
@@ -398,71 +403,66 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
                     (user_id, workspace_id, old_table_name))
         conn.commit()
         conn.close()
-        popup.destroy()
+        container.destroy()
         refresh_callback()
 
-    btn_frame = tk.Frame(popup)
+    btn_frame = tk.Frame(container)
     btn_frame.pack(pady=10)
 
     tk.Button(btn_frame, text="Save Changes", command=save_changes, bg="blue", fg="white").pack(side="left", padx=5)
     tk.Button(btn_frame, text="Delete Table", command=delete_table, bg="red", fg="white").pack(side="left", padx=5)
 
 #Function to handle add row functionality in the table
-def handle_add_row(user_id, workspace_id, table_name, refresh_callback):
-    def after_instrument_selected(name, symbol, token):
-        # Fetch existing table schema
-        conn = db_handler.sqlite3.connect("users.db")
-        cur = conn.cursor()
-        cur.execute("SELECT schema, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
-                    (user_id, workspace_id, table_name))
-        result = cur.fetchone()
-        if not result:
-            conn.close()
-            messagebox.showerror("Error", "Table not found.")
-            return
+def handle_add_row(user_id, workspace_id, table_name, refresh_callback, parent, name, symbol, token):
+    # Fetch existing table schema
+    conn = db_handler.sqlite3.connect("users.db")
+    cur = conn.cursor()
+    cur.execute("SELECT schema, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
+                (user_id, workspace_id, table_name))
+    result = cur.fetchone()
+    if not result:
+        conn.close()
+        messagebox.showerror("Error", "Table not found.")
+        return
 
-        schema = json.loads(result[0])
-        physical_table = result[1]
+    schema = json.loads(result[0])
+    physical_table = result[1]
 
-        next_id = get_next_session_id()
-        print("The next global user-based ID is:", next_id)
+    next_id = get_next_session_id()
+    print("The next global user-based ID is:", next_id)
 
-        # Create new row with the unique ID
-        new_row = {
-            "ID": str(next_id),  # Use the newly generated unique ID
-            "Strategy": f"{table_name}_{next_id}", # Update Strategy to use the new unique ID
-            "Table": table_name.upper(),
-            "STATUS": "INACTIVE",
-            "InstrumentToken": str(token),
-            "InstrumentID": symbol,
-            "InstrumentName": name,
-        }
+    # Create new row with the unique ID
+    new_row = {
+        "ID": str(next_id),  # Use the newly generated unique ID
+        "Strategy": f"{table_name}_{next_id}", # Update Strategy to use the new unique ID
+        "Table": table_name.upper(),
+        "STATUS": "INACTIVE",
+        "InstrumentToken": str(token),
+        "InstrumentID": symbol,
+        "InstrumentName": name,
+    }
 
-        # Add user-defined columns with defaults
-        for col in schema:
-            if col["name"] not in new_row:
-                new_row[col["name"]] = col["default"]
+    # Add user-defined columns with defaults
+    for col in schema:
+        if col["name"] not in new_row:
+            new_row[col["name"]] = col["default"]
 
-        # Build insert SQL
-        columns = list(new_row.keys())
-        placeholders = ",".join("?" for _ in columns)
-        # It's good practice to quote column names to avoid issues with reserved keywords
-        quoted_columns = ', '.join(f'"{col}"' for col in columns)
-        insert_sql = f"INSERT INTO {physical_table} ({quoted_columns}) VALUES ({placeholders})"
-        
-        try:
-            cur.execute(insert_sql, [new_row[col] for col in columns])
-            conn.commit()
-            messagebox.showinfo("Success", "Row added successfully!")
-            # This line ensures you stay on the correct table after adding a row
-            refresh_callback(table_name)
-        except db_handler.sqlite3.Error as e:
-            messagebox.showerror("Database Error", f"Failed to add row: {e}")
-        finally:
-            conn.close()
+    # Build insert SQL
+    columns = list(new_row.keys())
+    placeholders = ",".join("?" for _ in columns)
+    quoted_columns = ', '.join(f'"{col}"' for col in columns)
+    insert_sql = f"INSERT INTO {physical_table} ({quoted_columns}) VALUES ({placeholders})"
+    
+    try:
+        cur.execute(insert_sql, [new_row[col] for col in columns])
+        conn.commit()
+        messagebox.showinfo("Success", "Row added successfully!")
+        refresh_callback(table_name)
+    except db_handler.sqlite3.Error as e:
+        messagebox.showerror("Database Error", f"Failed to add row: {e}")
+    finally:
+        conn.close()
 
-    # Open instrument selection popup
-    select_instrument(after_instrument_selected)
 
 def open_workspace_layout(workspace_id, email, master_win=None, on_close_callback=None):
 
@@ -568,7 +568,15 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     def update_row_ui_active(row_id):
             widgets = entry_widgets_by_row_id.get(row_id)
+            
             if widgets:
+                subscription_col_names = widgets.get("__subscription_col_names", [])
+                for col, entry in widgets.items():
+                    if isinstance(entry, tk.Entry):
+                        if col in subscription_col_names:
+                            entry.config(state="normal")  # All subscribed columns editable
+                        else:
+                            entry.config(state="readonly")
                 if "STATUS" in widgets:
                     widgets["STATUS"].config(state='normal')
                     widgets["STATUS"].delete(0, tk.END)
@@ -592,6 +600,25 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     def update_row_ui_inactive(row_id):
         widgets = entry_widgets_by_row_id.get(row_id)
         if widgets:
+            # Fetch schema_data from the current table
+            table_name = widgets.get("TABLE").get() if "TABLE" in widgets else table_var.get()
+            conn = db_handler.sqlite3.connect("users.db")
+            cur = conn.cursor()
+            cur.execute("SELECT schema FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
+                        (user_id, workspace_id, table_name))
+            result = cur.fetchone()
+            conn.close()
+            if result:
+                schema_data = json.loads(result[0])
+            else:
+                schema_data = []
+            editable_cols = set(col["name"] for col in schema_data if col.get("editable"))
+            for col, entry in widgets.items():
+                if isinstance(entry, tk.Entry):
+                    if col in editable_cols:
+                        entry.config(state="normal")
+                    else:
+                        entry.config(state="readonly")
             if "STATUS" in widgets:
                 widgets["STATUS"].config(state='normal')
                 widgets["STATUS"].delete(0, tk.END)
@@ -924,7 +951,9 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             # Define static/system columns
             static_columns = {"ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"}
 
-            # Add "Select" column header
+
+
+             # Add "Select" column header
             tk.Label(scroll_frame, text="Select", font=("Arial", 10, "bold"),
                  bg="#1f2937", fg="white", borderwidth=1, relief="solid", width=10).grid(row=0, column=0, sticky="nsew")
             for col_idx, col_name in enumerate(col_names):
@@ -934,6 +963,28 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 entry = tk.Entry(scroll_frame, width=15, disabledforeground="black", justify="center", bg=row_bg, relief="flat")
                 val = row_data[col_idx]
                 entry.insert(0, "" if val is None else str(val))
+
+                # Apply validation if editable
+                is_subscription = any(col["name"] == col_name and col.get("subscription") for col in schema_data)
+                if col_name in editable_cols or is_subscription:
+                    # Find column type from schema
+                    col_type = next((col['type'] for col in schema_data if col['name'] == col_name), "TEXT")
+                    vcmd = entry.register(create_validator(col_type))
+                    entry.config(validate="key", validatecommand=(vcmd, '%P'))
+                    def save_edit(event, col=col_name, row=row_id, e_widget=entry):
+                        new_value = e_widget.get()
+                        conn2 = db_handler.sqlite3.connect("users.db")
+                        cur2 = conn2.cursor()
+                        try:
+                            cur2.execute(f'UPDATE {physical_table} SET "{col}" = ? WHERE ID = ?', (new_value, row))
+                            conn2.commit()
+                        except Exception as ex:
+                            print(f"❌ DB Update Error for {col}, ID={row}: {ex}")
+                        finally:
+                            conn2.close()
+                    entry.bind("<FocusOut>", save_edit)
+                else:
+                    entry.config(state="readonly", readonlybackground=row_bg, fg="black")
 
                 # Apply validation if editable
                 if col_name in editable_cols:
@@ -1121,6 +1172,10 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             row_widgets["stop_btn"] = stop_btn
             row_widgets["delete_btn"] = delete_btn
 
+            # After the for col_idx, col_name in enumerate(col_names) loop
+            subscription_col_names = [col["name"] for col in schema_data if col.get("subscription")]
+            row_widgets["__subscription_col_names"] = subscription_col_names
+
             update_strategy_status_display()
 
     def update_strategy_status_display():
@@ -1254,6 +1309,37 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             messagebox.showinfo("Export Success", f"Table '{table_name}' exported successfully!")
         conn.close()
 
+    def export_schema_only():
+        table_name = table_var.get()
+        if not table_name:
+            messagebox.showerror("Error", "Please select a table to export schema.")
+            return
+
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+        cur.execute("SELECT schema FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
+                    (user_id, workspace_id, table_name))
+        result = cur.fetchone()
+        conn.close()
+
+        if not result:
+            messagebox.showerror("Error", "Schema not found.")
+            return
+
+        schema_json = result[0]
+        schema = json.loads(schema_json)
+
+        export_data = {
+            "table_name": table_name,
+            "schema": schema
+        }
+
+        save_path = asksaveasfilename(defaultextension=".json", filetypes=[("JSON Files", "*.json")])
+        if save_path:
+            with open(save_path, "w") as f:
+                json.dump(export_data, f, indent=4)
+            messagebox.showinfo("Export Success", f"Schema for '{table_name}' exported successfully!")
+
     def import_table_from_json():
         file_path = askopenfilename(filetypes=[("JSON Files", "*.json")])
         if not file_path:
@@ -1305,62 +1391,149 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         messagebox.showinfo("Import Success", f"Table '{imported_table_name}' imported successfully!")
         refresh_tables(imported_table_name)
 
+    def import_schema_only():
+        file_path = askopenfilename(filetypes=[("JSON Files", "*.json")])
+        if not file_path:
+            return
+        
+        print("this is the file path", file_path)
+
+        with open(file_path, "r") as f:
+            data = json.load(f)
+
+        imported_table_name = data.get("table_name", "").upper()
+        schema = data.get("schema", [])
+
+        if not imported_table_name or not schema:
+            messagebox.showerror("Import Error", "Invalid or corrupt schema file.")
+            return
+
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+
+        physical_table_name = f"user_{user_id}_ws_{workspace_id}_{imported_table_name}".replace(" ", "_")
+
+        column_defs = ['"ID" TEXT', '"STRATEGY" TEXT', '"TABLE" TEXT', '"STATUS" TEXT',
+                    '"InstrumentToken" TEXT', '"InstrumentID" TEXT', '"InstrumentName" TEXT']
+        for col in schema:
+            column_defs.append(f'"{col["name"]}" {col["type"]}')
+
+        cur.execute(f"CREATE TABLE IF NOT EXISTS {physical_table_name} ({', '.join(column_defs)})")
+
+        cur.execute("INSERT OR IGNORE INTO user_tables (user_id, workspace_id, table_name, schema, physical_table_name, is_default) VALUES (?, ?, ?, ?, ?, 0)",
+                    (user_id, workspace_id, imported_table_name, json.dumps(schema), physical_table_name))
+
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo("Import Success", f"Schema for '{imported_table_name}' imported successfully!")
+        refresh_tables(imported_table_name)
+
+    def open_table_actions_popup(parent, workspace_id, user_id, table_var, refresh_tables):
+        global table_actions_popup
+
+        if table_actions_popup and table_actions_popup.winfo_exists():
+            table_actions_popup.deiconify()  
+            table_actions_popup.lift()
+            table_actions_popup.focus_force()
+            return
+        popup = tk.Toplevel(parent)
+        table_actions_popup = popup
+        popup.title("Table Actions")
+        popup.geometry("600x500")
+
+        center_window(popup)
+
+        def on_close():
+            global table_actions_popup
+            cleanup_window(popup)  # if using cleanup_window from window_utils
+            popup.destroy()
+            table_actions_popup = None
+
+        popup.protocol("WM_DELETE_WINDOW", on_close)
+
+        notebook = ttk.Notebook(popup)
+        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # --- New Table Tab ---
+        new_table_tab = tk.Frame(notebook)
+        notebook.add(new_table_tab, text="New Table")
+        open_create_table_popup(new_table_tab, workspace_id, user_id, lambda: refresh_tables(table_var.get()))
+
+        # --- Edit Table Tab ---
+        edit_table_tab = tk.Frame(notebook)
+        notebook.add(edit_table_tab, text="Edit Table")
+        # Only show if a table is selected
+        def show_edit_table():
+            selected_table = table_var.get()
+            if not selected_table:
+                tk.Label(edit_table_tab, text="Select a table to edit.", font=("Arial", 12)).pack(pady=10)
+            else:
+                open_edit_table_popup(edit_table_tab, workspace_id, user_id, selected_table, lambda: refresh_tables(table_var.get()))
+        show_edit_table()
+
+        # --- Add Row Tab ---
+        add_row_tab = tk.Frame(notebook)
+        notebook.add(add_row_tab, text="Add Row")
+        # Place instrument selection UI in this tab
+        instrument_frame = tk.Frame(add_row_tab)
+        instrument_frame.pack(fill="x", padx=10, pady=10)
+        select_instrument(instrument_frame, lambda name, symbol, token: handle_add_row(
+            user_id, workspace_id, table_var.get(), refresh_tables, add_row_tab, name, symbol, token))
+        
+    def open_import_export_popup(parent):
+        popup = tk.Toplevel(parent)
+        popup.title("Import / Export")
+        popup.geometry("400x300")
+        center_window(popup)
+
+        def on_close():
+            popup.destroy()
+        popup.protocol("WM_DELETE_WINDOW", on_close)
+
+        label = tk.Label(popup, text="Import / Export Options", font=("Arial", 14, "bold"))
+        label.pack(pady=20)
+
+        btn_export_table = tk.Button(
+            popup, text="📤 Export Table as JSON",
+            command=export_table_as_json,
+            bg="#F2D2BD", fg="black", font=("Arial", 11, "bold"),
+            relief="flat", padx=12, pady=8, cursor="hand2", width=25
+        )
+        btn_export_table.pack(pady=5)
+
+        btn_import_table = tk.Button(
+            popup, text="📥 Import Table from JSON",
+            command=import_table_from_json,
+            bg="#AFE1AF", fg="black", font=("Arial", 11, "bold"),
+            relief="flat", padx=12, pady=8, cursor="hand2", width=25
+        )
+        btn_import_table.pack(pady=5)
+
+        btn_export_schema = tk.Button(
+            popup, text="📤 Export Schema Only",
+            command=export_schema_only,
+            bg="#facc15", fg="black", font=("Arial", 11, "bold"),
+            relief="flat", padx=12, pady=8, cursor="hand2", width=25
+        )
+        btn_export_schema.pack(pady=5)
+
+        btn_import_schema = tk.Button(
+            popup, text="📥 Import Schema Only",
+            command=import_schema_only,
+            bg="#a5f3fc", fg="black", font=("Arial", 11, "bold"),
+            relief="flat", padx=12, pady=8, cursor="hand2", width=25
+        )
+        btn_import_schema.pack(pady=5)
+
     # Attach action buttons
     for act in TABLE_ACTIONS:
-        if act == "New Table":
-            btn = tk.Button(
-                action_btns, text=act,
-                command=lambda: open_create_table_popup(win, workspace_id, user_id, lambda: refresh_tables(table_var.get())),
-                bg="#2563eb", fg="white",
-                activebackground="#1d4ed8", activeforeground="white",
-                font=("Arial", 10, "bold"),
-                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
-            )
-
-        elif act == "Set Default":
+        if act == "Set Default":
             btn = tk.Button(
                 action_btns, text=act,
                 command=lambda: set_default_table(table_var.get()),
                 bg="#6b7280", fg="white",
                 activebackground="#4b5563", activeforeground="white",
-                font=("Arial", 10, "bold"),
-                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
-            )
-
-        elif act == "Export Table":
-            btn = tk.Button(
-                action_btns, text=act,
-                command=export_table_as_json,
-                bg="#F2D2BD", fg="black",
-                font=("Arial", 10, "bold"),
-                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
-            )
-
-        elif act == "Import Table":
-            btn = tk.Button(
-                action_btns, text=act,
-                command=import_table_from_json,
-                bg="#AFE1AF", fg="black",
-                font=("Arial", 10, "bold"),
-                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
-            )
-
-        elif act == "Edit Table":
-            btn = tk.Button(
-                action_btns, text=act,
-                command=lambda: open_edit_table_popup(win, workspace_id, user_id, table_var.get(), refresh_tables),
-                bg="#0ea5e9", fg="white",
-                activebackground="#0284c7", activeforeground="white",
-                font=("Arial", 10, "bold"),
-                relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
-            )
-
-        elif act == "Add Row":
-            btn = tk.Button(
-                action_btns, text=act,
-                command=lambda: handle_add_row(user_id, workspace_id, table_var.get(), refresh_tables),
-                bg="#22c55e", fg="white",
-                activebackground="#16a34a", activeforeground="white",
                 font=("Arial", 10, "bold"),
                 relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
             )
@@ -1385,6 +1558,12 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
             )
 
+        elif act in ("New Table", "Add Row", "Edit Table"):
+            continue
+
+        elif act in ("Export Table", "Import Table", "Export Schema", "Import Schema"):
+            continue
+
         else:
             btn = tk.Button(
                 action_btns, text=act,
@@ -1394,6 +1573,21 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             )
 
         btn.pack(side="left", padx=5, pady=2)
+    tk.Button(
+    action_btns, text="Table Actions",
+    command=lambda: open_table_actions_popup(win, workspace_id, user_id, table_var, refresh_tables),
+    bg="#2563eb", fg="white",
+    font=("Arial", 10, "bold"),
+    relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+).pack(side="left", padx=5, pady=2)
+    
+    tk.Button(
+    action_btns, text="Import/Export",
+    command=lambda: open_import_export_popup(win),
+    bg="#9333ea", fg="white",
+    font=("Arial", 10, "bold"),
+    relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+).pack(side="left", padx=5, pady=2)
 
     def back():
         cleanup_window(win) 
