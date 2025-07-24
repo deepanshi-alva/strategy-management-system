@@ -4,3 +4,4 @@ dist
 build
 main.spec
 tcp_test_server.spec
+configs

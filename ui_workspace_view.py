@@ -4,6 +4,7 @@ import db_handler
 import json
 from instrument_pop import select_instrument
 # from functools import partial
+import os
 from tcp_utils import send_tcp_command
 import threading
 from tkinter.filedialog import asksaveasfilename, askopenfilename
@@ -462,7 +463,6 @@ def handle_add_row(user_id, workspace_id, table_name, refresh_callback, parent, 
         messagebox.showerror("Database Error", f"Failed to add row: {e}")
     finally:
         conn.close()
-
 
 def open_workspace_layout(workspace_id, email, master_win=None, on_close_callback=None):
 
@@ -1526,6 +1526,94 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         )
         btn_import_schema.pack(pady=5)
 
+    def open_system_configuration_popup(parent, user_id, workspace_id):
+        popup = tk.Toplevel(parent)
+        popup.title("System Configuration")
+        # A slightly larger initial size might help with alignment
+        popup.geometry("450x220")
+        center_window(popup)
+
+        timer_enabled_var = tk.BooleanVar()
+        timer_value_var = tk.StringVar()
+        # Set a default value for the spinbox
+        timer_value_var.set("5") # Default to 5 minutes
+
+        config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                config_data = json.load(f)
+                timer_enabled_var.set(config_data.get("auto_refresh_enabled", False))
+                timer_value_var.set(str(config_data.get("auto_refresh_interval", 5)))
+        else:
+            timer_enabled_var.set(False)
+            timer_value_var.set("5")  # Default
+
+        # Function to enable/disable timer input based on checkbox
+        def toggle_timer_input():
+            if timer_enabled_var.get():
+                timer_spinbox.config(state="normal")
+            else:
+                timer_spinbox.config(state="disabled")
+
+        # --- Layout for Checkbox ---
+        checkbox_frame = tk.Frame(popup)
+        checkbox_frame.pack(pady=(20, 5), padx=20, fill="x", anchor="nw") # pad top more, fill x, anchor north-west
+
+        timer_checkbox = tk.Checkbutton(
+            checkbox_frame, # Parent to this new frame
+            text="Enable Auto-Refresh Timer",
+            variable=timer_enabled_var,
+            command=toggle_timer_input,
+            font=("Arial", 11)
+        )
+        timer_checkbox.pack(side="left", anchor="w") # Pack to the left within its frame
+
+        # --- Layout for Timer Interval Input (Label + Spinbox) ---
+        timer_input_frame = tk.Frame(popup)
+        timer_input_frame.pack(pady=5, padx=20, fill="x", anchor="nw") # Align with checkbox frame
+
+        tk.Label(timer_input_frame, text="Auto-Refresh Interval (minutes):", font=("Arial", 10)).pack(side="left", padx=(0, 5)) # Add right padding to label
+
+        timer_spinbox = ttk.Spinbox(
+            timer_input_frame, # Parent to this frame
+            from_=1,
+            to=60,
+            increment=1,
+            textvariable=timer_value_var,
+            width=5,
+            wrap=True
+        )
+        timer_spinbox.pack(side="left") # Pack to the left
+
+        # Initially disable the timer entry if checkbox is not checked
+        toggle_timer_input()
+
+        # --- Save Button ---
+        def save_settings():
+            enabled = timer_enabled_var.get()
+            interval = int(timer_value_var.get())
+
+            # Ensure config folder exists
+            os.makedirs("configs", exist_ok=True)
+
+            config_data = {
+                "auto_refresh_enabled": enabled,
+                "auto_refresh_interval": interval
+            }
+
+            config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
+            with open(config_path, "w") as f:
+                json.dump(config_data, f, indent=4)
+
+            messagebox.showinfo("Settings Saved",
+                                f"Timer Enabled: {enabled}\n"
+                                f"Timer Interval: {interval} minutes")
+            popup.destroy()
+
+        save_btn = tk.Button(popup, text="Save Settings", command=save_settings,
+                            bg="#28a745", fg="white", font=("Arial", 10, "bold"), relief="flat")
+        save_btn.pack(pady=20)
+
     # Attach action buttons
     for act in TABLE_ACTIONS:
         if act == "Set Default":
@@ -1574,20 +1662,28 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
         btn.pack(side="left", padx=5, pady=2)
     tk.Button(
-    action_btns, text="Table Actions",
-    command=lambda: open_table_actions_popup(win, workspace_id, user_id, table_var, refresh_tables),
-    bg="#2563eb", fg="white",
-    font=("Arial", 10, "bold"),
-    relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
-).pack(side="left", padx=5, pady=2)
+        action_btns, text="Table Actions",
+        command=lambda: open_table_actions_popup(win, workspace_id, user_id, table_var, refresh_tables),
+        bg="#9099aa", fg="white",
+        font=("Arial", 10, "bold"),
+        relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+    ).pack(side="left", padx=5, pady=2)
     
     tk.Button(
-    action_btns, text="Import/Export",
-    command=lambda: open_import_export_popup(win),
-    bg="#9333ea", fg="white",
-    font=("Arial", 10, "bold"),
-    relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
-).pack(side="left", padx=5, pady=2)
+        action_btns, text="Import/Export",
+        command=lambda: open_import_export_popup(win),
+        bg="#798091", fg="white",
+        font=("Arial", 10, "bold"),
+        relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+    ).pack(side="left", padx=5, pady=2)
+    
+    tk.Button(
+        action_btns, text="System Configuration",
+        command=lambda: open_system_configuration_popup(win, user_id, workspace_id),
+        bg="#5d6370", fg="white",
+        font=("Arial", 10, "bold"),
+        relief="flat", bd=0, padx=12, pady=6, cursor="hand2"
+    ).pack(side="left", padx=5, pady=2)
 
     def back():
         cleanup_window(win) 
@@ -1598,7 +1694,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
  
     # Add "Back to Workspaces" after "Stop All"
     back_btn = tk.Button(action_btns, text="Back to Workspaces", command=back,
-                        bg="#f44336", fg="white", font=("Arial", 10, "bold"),bd=0, padx=12, pady=6)
+                        bg="#4c525e", fg="white", font=("Arial", 10, "bold"),bd=0, padx=12, pady=6)
     back_btn.pack(side="left", padx=5)
 
     right_buttons = tk.Frame(header)
