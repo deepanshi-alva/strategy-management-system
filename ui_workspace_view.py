@@ -1574,15 +1574,26 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
         tk.Label(timer_input_frame, text="Auto-Refresh Interval (minutes):", font=("Arial", 10)).pack(side="left", padx=(0, 5)) # Add right padding to label
 
+        def validate_spinbox_input(value):
+            if value.isdigit():
+                val = int(value)
+                return 1 <= val <= 60
+            return False
+
+        vcmd = (popup.register(validate_spinbox_input), "%P")
+
         timer_spinbox = ttk.Spinbox(
-            timer_input_frame, # Parent to this frame
+            timer_input_frame,
             from_=1,
             to=60,
             increment=1,
             textvariable=timer_value_var,
             width=5,
-            wrap=True
+            wrap=True,
+            validate="key",
+            validatecommand=vcmd
         )
+
         timer_spinbox.pack(side="left") # Pack to the left
 
         # Initially disable the timer entry if checkbox is not checked
