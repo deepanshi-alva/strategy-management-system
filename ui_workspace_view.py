@@ -1672,6 +1672,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             )
 
         btn.pack(side="left", padx=5, pady=2)
+        
     tk.Button(
         action_btns, text="Table Actions",
         command=lambda: open_table_actions_popup(win, workspace_id, user_id, table_var, refresh_tables),
