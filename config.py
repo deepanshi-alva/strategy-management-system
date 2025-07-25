@@ -1,6 +1,7 @@
 # config.py
 import threading
 import time
+LAST_KNOWN_INTERVAL_MS = None
 
 def start_global_timer(callback_every_second=None):
     global TIMER_STARTED, GLOBAL_ELAPSED_SECONDS
@@ -21,6 +22,10 @@ def start_global_timer(callback_every_second=None):
 
 
 cached_instruments = []
+
 GLOBAL_SESSION_COUNTER=1
+
 GLOBAL_ELAPSED_SECONDS = 0
 TIMER_STARTED = False
+
+TEMP_ROW_STORAGE = {}

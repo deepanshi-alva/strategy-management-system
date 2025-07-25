@@ -10,6 +10,7 @@ import threading
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 from window_utils import center_window, on_configure, cleanup_window 
 import config
+import time
 
 table_actions_popup = None  # Add at module level
 
@@ -385,7 +386,6 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
         open_edit_table_popup(container, workspace_id, user_id, new_table_name, refresh_callback)
         refresh_callback()
 
-
     def delete_table():
         confirm = messagebox.askyesno("Delete Table", f"Are you sure you want to delete '{old_table_name}'?")
         if not confirm:
@@ -455,10 +455,15 @@ def handle_add_row(user_id, workspace_id, table_name, refresh_callback, parent, 
     insert_sql = f"INSERT INTO {physical_table} ({quoted_columns}) VALUES ({placeholders})"
     
     try:
-        cur.execute(insert_sql, [new_row[col] for col in columns])
-        conn.commit()
-        messagebox.showinfo("Success", "Row added successfully!")
-        refresh_callback(table_name)
+        # Save to pending memory, not DB
+        if not hasattr(config, "PENDING_ROWS"):
+            config.PENDING_ROWS = []
+        config.PENDING_ROWS.append((physical_table, new_row))
+
+        # Show in UI immediately using callback
+        messagebox.showinfo("Success", "Row added to table. It will auto-save after interval.")
+        refresh_callback(table_name)  # This function will re-render the table including unsaved data
+
     except db_handler.sqlite3.Error as e:
         messagebox.showerror("Database Error", f"Failed to add row: {e}")
     finally:
@@ -469,6 +474,21 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     user_id = db_handler.get_user_id(email)
     workspace = db_handler.get_workspace_by_id(workspace_id)
     entry_widgets_by_row_id = {}
+
+    config.CURRENT_USER_ID = user_id
+    config.CURRENT_WORKSPACE_ID = workspace_id
+
+    # Load system configuration for this user/workspace
+    config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            config_data = json.load(f)
+    else:
+        config_data = {
+            "auto_refresh_enabled": False,
+            "auto_refresh_interval": 5  # default 5 minutes
+        }
+
     name, theme, icon = workspace
 
     bg_color = "#ffffff" if theme == "light" else "#111111"
@@ -513,6 +533,25 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         print("✅ No active strategies. Closing workspace.")
         if on_close_callback:
             on_close_callback(workspace_id)
+
+        # Save all pending rows before closing
+        if hasattr(config, "PENDING_ROWS") and config.PENDING_ROWS:
+            print("💾 Saving pending rows before close...")
+            conn = db_handler.sqlite3.connect("users.db")
+            cur = conn.cursor()
+            while config.PENDING_ROWS:
+                physical_table, row = config.PENDING_ROWS.pop(0)
+                columns = list(row.keys())
+                placeholders = ",".join("?" for _ in columns)
+                quoted_columns = ', '.join(f'"{col}"' for col in columns)
+                insert_sql = f'INSERT INTO "{physical_table}" ({quoted_columns}) VALUES ({placeholders})'
+                try:
+                    cur.execute(insert_sql, [row[col] for col in columns])
+                except Exception as e:
+                    print(f"❌ Save failed before close: {e}")
+            conn.commit()
+            conn.close()
+            print("✅ All unsaved data flushed.")
 
         cleanup_window(win)
         win.destroy()
@@ -825,6 +864,22 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             rows = cur.fetchall()
             col_names = [desc[0] for desc in cur.description]
             conn.close()
+            if hasattr(config, "PENDING_ROWS"):
+                for ptbl, row_dict in config.PENDING_ROWS:
+                    if ptbl == physical_table:
+                        pending_row = []
+                        for col in col_names:
+                            # Normalize to lowercase keys to avoid mismatch (case-insensitive match)
+                            found = False
+                            for key in row_dict:
+                                if key.lower() == col.lower():
+                                    pending_row.append(row_dict[key])
+                                    found = True
+                                    break
+                            if not found:
+                                pending_row.append("")
+                        rows.append(pending_row)
+
         except Exception as e:
             conn.close()
             tk.Label(content_frame, text=f"Error reading data: {e}", font=("Arial", 12), bg=bg_color, fg="red").pack()
@@ -950,8 +1005,6 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
             # Define static/system columns
             static_columns = {"ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"}
-
-
 
              # Add "Select" column header
             tk.Label(scroll_frame, text="Select", font=("Arial", 10, "bold"),
@@ -1672,7 +1725,6 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             )
 
         btn.pack(side="left", padx=5, pady=2)
-        
     tk.Button(
         action_btns, text="Table Actions",
         command=lambda: open_table_actions_popup(win, workspace_id, user_id, table_var, refresh_tables),
@@ -1751,6 +1803,22 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     )
     timer_label.pack(side="right")
 
+    pending_label = tk.Label(
+    footer_frame,
+    text="⏱ Pending rows: 0",
+    font=("Arial", 10),
+    bg=bg_color,
+    fg="orange"
+    )
+    pending_label.pack(side="right", padx=10)
+
+    def update_pending_count():
+        count = len(getattr(config, "PENDING_ROWS", []))
+        pending_label.config(text=f"⏱ Pending rows: {count}")
+        win.after(1000, update_pending_count)
+
+    update_pending_count()
+
     def update_timer_from_global():
         secs = config.GLOBAL_ELAPSED_SECONDS
         h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
@@ -1758,6 +1826,71 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         win.after(1000, update_timer_from_global)
 
     update_timer_from_global()
+
+    # Auto-save configuration from config file (already loaded)
+    config.AUTO_SAVE_INTERVAL_MS = int(config_data.get("auto_refresh_interval", 5)) * 60 * 1000
+    config.AUTO_SAVE_ENABLED = config_data.get("auto_refresh_enabled", False)
+    config.PENDING_ROWS = []
+    config.LAST_SAVE_TIMESTAMP = time.time()
+
+    try:
+        user_id = config.CURRENT_USER_ID
+        workspace_id = config.CURRENT_WORKSPACE_ID
+        config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                config_data = json.load(f)
+            config.AUTO_SAVE_INTERVAL_MS = int(config_data.get("auto_refresh_interval", 5)) * 60 * 1000
+            config.AUTO_SAVE_ENABLED = config_data.get("auto_refresh_enabled", False)
+        else:
+            print("⚠️ Config file not found.")
+    except Exception as e:
+        print(f"❌ Config refresh error: {e}")
+
+    print(f"[DEBUG] Interval (ms): {config.AUTO_SAVE_INTERVAL_MS}")
+
+    # if not getattr(config, "AUTO_SAVE_ENABLED", False):
+    #     print("🛑 Auto-save is disabled. Skipping.")
+    #     win.after(10000, auto_save_pending_rows)
+    #     return
+
+    interval_sec = config.AUTO_SAVE_INTERVAL_MS / 1000
+    print(f"[DEBUG] interval_sec = {interval_sec}")
+
+    def auto_save_pending_rows():
+        now = time.time()
+        interval_sec = config.AUTO_SAVE_INTERVAL_MS / 1000
+        elapsed = now - config.LAST_SAVE_TIMESTAMP
+
+        if elapsed >= interval_sec:
+            print("⏳ Auto-saving triggered...")
+            if getattr(config, "AUTO_SAVE_ENABLED", False) and hasattr(config, "PENDING_ROWS") and config.PENDING_ROWS:
+                conn = db_handler.sqlite3.connect("users.db")
+                cur = conn.cursor()
+                while config.PENDING_ROWS:
+                    physical_table, row = config.PENDING_ROWS.pop(0)
+                    columns = list(row.keys())
+                    placeholders = ",".join("?" for _ in columns)
+                    quoted_columns = ', '.join(f'"{col}"' for col in columns)
+                    insert_sql = f'INSERT INTO "{physical_table}" ({quoted_columns}) VALUES ({placeholders})'
+                    try:
+                        cur.execute(insert_sql, [row[col] for col in columns])
+                        print(f"✅ Saved row to {physical_table}")
+                    except Exception as e:
+                        print(f"❌ Failed to save row: {e}")
+                conn.commit()
+                conn.close()
+            else:
+                print("🛑 No rows to save or auto-save disabled")
+
+            config.LAST_SAVE_TIMESTAMP = now  # ✅ move clock forward even if no rows
+        else:
+            print(f"⏱ {int(interval_sec - elapsed)}s until next save")
+
+        # 🔁 Repeat check every 10 seconds
+        win.after(10000, auto_save_pending_rows)
+
+    win.after(config.AUTO_SAVE_INTERVAL_MS, auto_save_pending_rows)
 
     refresh_tables()
 
