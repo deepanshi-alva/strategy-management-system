@@ -1725,13 +1725,38 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                           cursor="hand2",bd=0, padx=12, pady=6
                          ).pack(side="left")
 
-         # === STATUS BAR ===
-    status_frame = tk.Frame(win, bg=bg_color)
-    status_frame.pack(fill="x", padx=20, pady=5)
+    # === FOOTER FRAME ===
+    footer_frame = tk.Frame(win, bg=bg_color)
+    footer_frame.pack(fill="x", side="bottom", padx=20, pady=5)
 
-    status_label = tk.Label(status_frame, text="No strategies applied yet", font=("Arial", 10, "bold"),
-                        bg=bg_color, fg="green", anchor="w", justify="left")
+    # Left: Strategy count
+    status_label = tk.Label(
+        footer_frame,
+        text="📈 Loading strategy count...",
+        font=("Arial", 10, "bold"),
+        bg=bg_color,
+        fg="green",
+        anchor="w"
+    )
     status_label.pack(side="left")
+
+    # Right: Global timer
+    timer_label = tk.Label(
+        footer_frame,
+        text="⏱ Elapsed: 00:00:00",
+        font=("Arial", 10),
+        bg=bg_color,
+        fg="gray"
+    )
+    timer_label.pack(side="right")
+
+    def update_timer_from_global():
+        secs = config.GLOBAL_ELAPSED_SECONDS
+        h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+        timer_label.config(text=f"⏱ Elapsed: {h:02}:{m:02}:{s:02}")
+        win.after(1000, update_timer_from_global)
+
+    update_timer_from_global()
 
     refresh_tables()
 

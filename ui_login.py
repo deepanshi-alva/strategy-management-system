@@ -130,6 +130,7 @@ def login_window():
             win.destroy()
             user_id = db_handler.get_user_id(email)
             reinitialize_session_ids(user_id)
+            config.start_global_timer()
             ui_workspace.workspace_window(email)
         else:
             messagebox.showerror("Failed", "Invalid credentials")
