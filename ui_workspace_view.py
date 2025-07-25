@@ -553,6 +553,22 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             conn.close()
             print("✅ All unsaved data flushed.")
 
+        # Save all pending edits before closing
+        if hasattr(config, "PENDING_EDITS") and config.PENDING_EDITS:
+            print(f"💾 Saving {len(config.PENDING_EDITS)} pending edits before close...")
+            conn = db_handler.sqlite3.connect("users.db")
+            cur = conn.cursor()
+            for (physical_table, row_id), changes in config.PENDING_EDITS.items():
+                for col, value in changes.items():
+                    try:
+                        cur.execute(f'UPDATE "{physical_table}" SET "{col}" = ? WHERE ID = ?', (value, row_id))
+                        print(f"✅ Saved edit on close: {physical_table} [{row_id}]: {col} = {value}")
+                    except Exception as e:
+                        print(f"❌ Failed to save edit on close: {physical_table} [{row_id}] {col}: {e}")
+            conn.commit()
+            conn.close()
+            config.PENDING_EDITS.clear()
+
         cleanup_window(win)
         win.destroy()
         if master_win:
@@ -1016,6 +1032,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 entry = tk.Entry(scroll_frame, width=15, disabledforeground="black", justify="center", bg=row_bg, relief="flat")
                 val = row_data[col_idx]
                 entry.insert(0, "" if val is None else str(val))
+                entry.original_value = "" if val is None else str(val)
 
                 # Apply validation if editable
                 is_subscription = any(col["name"] == col_name and col.get("subscription") for col in schema_data)
@@ -1026,16 +1043,23 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                     entry.config(validate="key", validatecommand=(vcmd, '%P'))
                     def save_edit(event, col=col_name, row=row_id, e_widget=entry):
                         new_value = e_widget.get()
-                        conn2 = db_handler.sqlite3.connect("users.db")
-                        cur2 = conn2.cursor()
-                        try:
-                            cur2.execute(f'UPDATE {physical_table} SET "{col}" = ? WHERE ID = ?', (new_value, row))
-                            conn2.commit()
-                        except Exception as ex:
-                            print(f"❌ DB Update Error for {col}, ID={row}: {ex}")
-                        finally:
-                            conn2.close()
+                        original_value = getattr(e_widget, "original_value", "")
+
+                        if new_value == original_value:
+                            return
+                        
+                        if not hasattr(config, "PENDING_EDITS"):
+                            config.PENDING_EDITS = {}
+
+                        key = (physical_table, row)
+                        if key not in config.PENDING_EDITS:
+                            config.PENDING_EDITS[key] = {}
+
+                        config.PENDING_EDITS[key][col] = new_value
+                        print(f"📝 Staged edit for {key}: {col} = {new_value}")
+                    entry.bind("<KeyRelease>", save_edit)
                     entry.bind("<FocusOut>", save_edit)
+
                 else:
                     entry.config(state="readonly", readonlybackground=row_bg, fg="black")
 
@@ -1047,16 +1071,21 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                     entry.config(validate="key", validatecommand=(vcmd, '%P'))
                     def save_edit(event, col=col_name, row=row_id, e_widget=entry):
                         new_value = e_widget.get()
-                        conn2 = db_handler.sqlite3.connect("users.db")
-                        cur2 = conn2.cursor()
-                        try:
-                            cur2.execute(f'UPDATE {physical_table} SET "{col}" = ? WHERE ID = ?', (new_value, row))
-                            conn2.commit()
-                        except Exception as ex:
-                            print(f"❌ DB Update Error for {col}, ID={row}: {ex}")
-                        finally:
-                            conn2.close()
+                        original_value = getattr(e_widget, "original_value", "")
 
+                        if new_value == original_value:
+                            return
+
+                        if not hasattr(config, "PENDING_EDITS"):
+                            config.PENDING_EDITS = {}
+
+                        key = (physical_table, row)
+                        if key not in config.PENDING_EDITS:
+                            config.PENDING_EDITS[key] = {}
+
+                        config.PENDING_EDITS[key][col] = new_value
+                        print(f"📝 Staged edit for {key}: {col} = {new_value}")
+                    entry.bind("<KeyRelease>", save_edit)
                     entry.bind("<FocusOut>", save_edit)
                 else:
                     # Make truly read-only (no cursor, no edits)
@@ -1665,9 +1694,24 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 "auto_refresh_interval": interval
             }
 
-            config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
+            #config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
             with open(config_path, "w") as f:
                 json.dump(config_data, f, indent=4)
+
+            # config_path = f"configs/user_{user_id}ws{workspace_id}_config.json"
+            # 🔁 Update global config values
+            config.AUTO_SAVE_ENABLED = enabled
+            config.AUTO_SAVE_INTERVAL_MS = interval * 60 * 1000
+            config.LAST_SAVE_TIMESTAMP = time.time()
+
+            # 🔁 Reschedule auto-save
+            if config.AUTO_SAVE_JOB_ID:
+                win.after_cancel(config.AUTO_SAVE_JOB_ID)
+
+            def rescheduled():
+                auto_save_pending_rows()
+            
+            config.AUTO_SAVE_JOB_ID = win.after(1000, rescheduled)
 
             messagebox.showinfo("Settings Saved",
                                 f"Timer Enabled: {enabled}\n"
@@ -1814,7 +1858,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     def update_pending_count():
         count = len(getattr(config, "PENDING_ROWS", []))
-        pending_label.config(text=f"⏱ Pending rows: {count}")
+        edit_count = len(getattr(config, "PENDING_EDITS", {}))
+        pending_label.config(text=f"⏱ Pending: {count} rows / {edit_count} edits")
         win.after(1000, update_pending_count)
 
     update_pending_count()
@@ -1849,10 +1894,10 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     print(f"[DEBUG] Interval (ms): {config.AUTO_SAVE_INTERVAL_MS}")
 
-    # if not getattr(config, "AUTO_SAVE_ENABLED", False):
-    #     print("🛑 Auto-save is disabled. Skipping.")
-    #     win.after(10000, auto_save_pending_rows)
-    #     return
+    if not getattr(config, "AUTO_SAVE_ENABLED", False):
+        print("🛑 Auto-save is disabled. Skipping.")
+        win.after(10000, auto_save_pending_rows)
+        return
 
     interval_sec = config.AUTO_SAVE_INTERVAL_MS / 1000
     print(f"[DEBUG] interval_sec = {interval_sec}")
@@ -1864,6 +1909,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
         if elapsed >= interval_sec:
             print("⏳ Auto-saving triggered...")
+
+            # ✅ Save pending new rows (only if present)
             if getattr(config, "AUTO_SAVE_ENABLED", False) and hasattr(config, "PENDING_ROWS") and config.PENDING_ROWS:
                 conn = db_handler.sqlite3.connect("users.db")
                 cur = conn.cursor()
@@ -1880,14 +1927,28 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                         print(f"❌ Failed to save row: {e}")
                 conn.commit()
                 conn.close()
-            else:
-                print("🛑 No rows to save or auto-save disabled")
 
-            config.LAST_SAVE_TIMESTAMP = now  # ✅ move clock forward even if no rows
+            # ✅ Save pending edits (always check separately)
+            if getattr(config, "AUTO_SAVE_ENABLED", False) and hasattr(config, "PENDING_EDITS") and config.PENDING_EDITS:
+                print(f"📝 Flushing {len(config.PENDING_EDITS)} edited rows")
+                conn = db_handler.sqlite3.connect("users.db")
+                cur = conn.cursor()
+                for (physical_table, row_id), changes in config.PENDING_EDITS.items():
+                    for col, value in changes.items():
+                        try:
+                            cur.execute(f'UPDATE "{physical_table}" SET "{col}" = ? WHERE ID = ?', (value, row_id))
+                            print(f"✅ Saved edit: {physical_table} [{row_id}]: {col} = {value}")
+                        except Exception as e:
+                            print(f"❌ Failed to save edit: {physical_table} [{row_id}] {col}: {e}")
+                conn.commit()
+                conn.close()
+                config.PENDING_EDITS.clear()
+
+            config.LAST_SAVE_TIMESTAMP = now
+
         else:
-            print(f"⏱ {int(interval_sec - elapsed)}s until next save")
+            print(f"🕒 {int(interval_sec - elapsed)}s until next save")
 
-        # 🔁 Repeat check every 10 seconds
         win.after(10000, auto_save_pending_rows)
 
     win.after(config.AUTO_SAVE_INTERVAL_MS, auto_save_pending_rows)
