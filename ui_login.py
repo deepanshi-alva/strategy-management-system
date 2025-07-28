@@ -93,7 +93,7 @@ def login_window():
 
     tk.Label(frame, text="LOGIN", font=("Arial", 16, "bold")).pack(pady=10)
 
-    tk.Label(frame, text="Email").pack()
+    tk.Label(frame, text="User Id").pack()
     email_entry = tk.Entry(frame, width=30)
     email_entry.pack(pady=5)
 

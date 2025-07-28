@@ -26,7 +26,7 @@ def signup_window():
     name_entry.pack(pady=5)
 
     # Email
-    tk.Label(frame, text="Email").pack()
+    tk.Label(frame, text="User Id").pack()
     email_entry = tk.Entry(frame, width=30)
     email_entry.pack(pady=5)
 

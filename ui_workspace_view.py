@@ -13,6 +13,8 @@ import config
 import time
 
 table_actions_popup = None  # Add at module level
+system_config_window = None
+imp_exp_window = None
 
 def get_next_session_id():
     session_id = config.GLOBAL_SESSION_COUNTER
@@ -1564,20 +1566,35 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             user_id, workspace_id, table_var.get(), refresh_tables, add_row_tab, name, symbol, token))
         
     def open_import_export_popup(parent):
-        popup = tk.Toplevel(parent)
-        popup.title("Import / Export")
-        popup.geometry("400x300")
-        center_window(popup)
+        global imp_exp_window
 
+        if imp_exp_window and imp_exp_window.winfo_exists():
+            print("⚠️ System Config already open — focusing...")
+            imp_exp_window.deiconify()
+            imp_exp_window.lift()
+            imp_exp_window.focus_force()
+            return
+
+        # Create new window
+        imp_exp_window = tk.Toplevel()
+        imp_exp_window.title("System Configuration")
+        imp_exp_window.geometry("300x300")
+        center_window(imp_exp_window)
+
+        # Optional: prevent multiple closure references
         def on_close():
-            popup.destroy()
-        popup.protocol("WM_DELETE_WINDOW", on_close)
+            global imp_exp_window
+            if imp_exp_window and imp_exp_window.winfo_exists():
+                imp_exp_window.destroy()
+            imp_exp_window = None
 
-        label = tk.Label(popup, text="Import / Export Options", font=("Arial", 14, "bold"))
+        imp_exp_window.protocol("WM_DELETE_WINDOW", on_close)
+
+        label = tk.Label(imp_exp_window, text="Import / Export Options", font=("Arial", 14, "bold"))
         label.pack(pady=20)
 
         btn_export_table = tk.Button(
-            popup, text="📤 Export Table as JSON",
+            imp_exp_window, text="📤 Export Table as JSON",
             command=export_table_as_json,
             bg="#F2D2BD", fg="black", font=("Arial", 11, "bold"),
             relief="flat", padx=12, pady=8, cursor="hand2", width=25
@@ -1585,7 +1602,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         btn_export_table.pack(pady=5)
 
         btn_import_table = tk.Button(
-            popup, text="📥 Import Table from JSON",
+            imp_exp_window, text="📥 Import Table from JSON",
             command=import_table_from_json,
             bg="#AFE1AF", fg="black", font=("Arial", 11, "bold"),
             relief="flat", padx=12, pady=8, cursor="hand2", width=25
@@ -1593,7 +1610,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         btn_import_table.pack(pady=5)
 
         btn_export_schema = tk.Button(
-            popup, text="📤 Export Schema Only",
+            imp_exp_window, text="📤 Export Schema Only",
             command=export_schema_only,
             bg="#facc15", fg="black", font=("Arial", 11, "bold"),
             relief="flat", padx=12, pady=8, cursor="hand2", width=25
@@ -1601,7 +1618,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         btn_export_schema.pack(pady=5)
 
         btn_import_schema = tk.Button(
-            popup, text="📥 Import Schema Only",
+            imp_exp_window, text="📥 Import Schema Only",
             command=import_schema_only,
             bg="#a5f3fc", fg="black", font=("Arial", 11, "bold"),
             relief="flat", padx=12, pady=8, cursor="hand2", width=25
@@ -1609,11 +1626,30 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         btn_import_schema.pack(pady=5)
 
     def open_system_configuration_popup(parent, user_id, workspace_id):
-        popup = tk.Toplevel(parent)
-        popup.title("System Configuration")
-        # A slightly larger initial size might help with alignment
-        popup.geometry("450x220")
-        center_window(popup)
+        
+        global system_config_window
+
+        if system_config_window and system_config_window.winfo_exists():
+            print("⚠️ System Config already open — focusing...")
+            system_config_window.deiconify()
+            system_config_window.lift()
+            system_config_window.focus_force()
+            return
+
+        # Create new window
+        system_config_window = tk.Toplevel()
+        system_config_window.title("System Configuration")
+        system_config_window.geometry("300x200")
+        center_window(system_config_window)
+
+        # Optional: prevent multiple closure references
+        def on_close():
+            global system_config_window
+            if system_config_window and system_config_window.winfo_exists():
+                system_config_window.destroy()
+            system_config_window = None
+
+        system_config_window.protocol("WM_DELETE_WINDOW", on_close)
 
         timer_enabled_var = tk.BooleanVar()
         timer_value_var = tk.StringVar()
@@ -1638,7 +1674,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 timer_spinbox.config(state="disabled")
 
         # --- Layout for Checkbox ---
-        checkbox_frame = tk.Frame(popup)
+        checkbox_frame = tk.Frame(system_config_window)
         checkbox_frame.pack(pady=(20, 5), padx=20, fill="x", anchor="nw") # pad top more, fill x, anchor north-west
 
         timer_checkbox = tk.Checkbutton(
@@ -1651,7 +1687,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         timer_checkbox.pack(side="left", anchor="w") # Pack to the left within its frame
 
         # --- Layout for Timer Interval Input (Label + Spinbox) ---
-        timer_input_frame = tk.Frame(popup)
+        timer_input_frame = tk.Frame(system_config_window)
         timer_input_frame.pack(pady=5, padx=20, fill="x", anchor="nw") # Align with checkbox frame
 
         tk.Label(timer_input_frame, text="Auto-Refresh Interval (minutes):", font=("Arial", 10)).pack(side="left", padx=(0, 5)) # Add right padding to label
@@ -1662,7 +1698,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 return 1 <= val <= 60
             return False
 
-        vcmd = (popup.register(validate_spinbox_input), "%P")
+        vcmd = (system_config_window.register(validate_spinbox_input), "%P")
 
         timer_spinbox = ttk.Spinbox(
             timer_input_frame,
@@ -1716,9 +1752,9 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             messagebox.showinfo("Settings Saved",
                                 f"Timer Enabled: {enabled}\n"
                                 f"Timer Interval: {interval} minutes")
-            popup.destroy()
+            system_config_window.destroy()
 
-        save_btn = tk.Button(popup, text="Save Settings", command=save_settings,
+        save_btn = tk.Button(system_config_window, text="Save Settings", command=save_settings,
                             bg="#28a745", fg="white", font=("Arial", 10, "bold"), relief="flat")
         save_btn.pack(pady=20)
 
