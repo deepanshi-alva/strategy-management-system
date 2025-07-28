@@ -339,7 +339,7 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
 
         # Recreate table if any column is dropped
         if dropped_cols:
-            print(f"⚠️ Rebuilding table {physical_table} due to dropped columns: {dropped_cols}")
+            print(f"Rebuilding table {physical_table} due to dropped columns: {dropped_cols}")
 
             # Build list of columns to keep (system + user)
             system_cols = ["ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"]
@@ -369,7 +369,7 @@ def open_edit_table_popup(parent, workspace_id, user_id, old_table_name, refresh
                 try:
                     cur.execute(f'ALTER TABLE "{physical_table}" ADD COLUMN "{col["name"]}" {col["type"]}')
                 except Exception as e:
-                    print(f"⚠️ Column already exists: {col['name']}, skipping...")
+                    print(f"Column already exists: {col['name']}, skipping...")
 
                 # Set default value for all existing rows
                 if col["default"] != "":
@@ -506,7 +506,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     # MODIFIED: on_workspace_close now calls the provided callback
     def on_workspace_close():
-        print("🔒 Attempting to close workspace...")
+        print("Attempting to close workspace...")
         conn = db_handler.sqlite3.connect("users.db")
         cur = conn.cursor()
         cur.execute("SELECT table_name, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=?", (user_id, workspace_id))
@@ -521,7 +521,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 if count > 0:
                     active_tables.append(logical_name)
             except Exception as e:
-                print(f"❌ Failed to check {physical_name}: {e}")
+                print(f"Failed to check {physical_name}: {e}")
                 continue
 
         conn.close()
@@ -532,13 +532,13 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 f"❗ Please terminate your running strategies in the following table(s) before closing:\n\n{table_list}")
             return  # Don't close
 
-        print("✅ No active strategies. Closing workspace.")
+        print("No active strategies. Closing workspace.")
         if on_close_callback:
             on_close_callback(workspace_id)
 
         # Save all pending rows before closing
         if hasattr(config, "PENDING_ROWS") and config.PENDING_ROWS:
-            print("💾 Saving pending rows before close...")
+            print("Saving pending rows before close...")
             conn = db_handler.sqlite3.connect("users.db")
             cur = conn.cursor()
             while config.PENDING_ROWS:
@@ -550,23 +550,23 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 try:
                     cur.execute(insert_sql, [row[col] for col in columns])
                 except Exception as e:
-                    print(f"❌ Save failed before close: {e}")
+                    print(f"Save failed before close: {e}")
             conn.commit()
             conn.close()
-            print("✅ All unsaved data flushed.")
+            print("All unsaved data flushed.")
 
         # Save all pending edits before closing
         if hasattr(config, "PENDING_EDITS") and config.PENDING_EDITS:
-            print(f"💾 Saving {len(config.PENDING_EDITS)} pending edits before close...")
+            print(f"Saving {len(config.PENDING_EDITS)} pending edits before close...")
             conn = db_handler.sqlite3.connect("users.db")
             cur = conn.cursor()
             for (physical_table, row_id), changes in config.PENDING_EDITS.items():
                 for col, value in changes.items():
                     try:
                         cur.execute(f'UPDATE "{physical_table}" SET "{col}" = ? WHERE ID = ?', (value, row_id))
-                        print(f"✅ Saved edit on close: {physical_table} [{row_id}]: {col} = {value}")
+                        print(f"Saved edit on close: {physical_table} [{row_id}]: {col} = {value}")
                     except Exception as e:
-                        print(f"❌ Failed to save edit on close: {physical_table} [{row_id}] {col}: {e}")
+                        print(f"Failed to save edit on close: {physical_table} [{row_id}] {col}: {e}")
             conn.commit()
             conn.close()
             config.PENDING_EDITS.clear()
@@ -979,7 +979,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
          bg="#d9d9d9", borderwidth=1, relief="solid", width=10).grid(row=0, column=len(col_names)+3, sticky="nsew")
         
         if not rows:
-            print("✅ No rows found. Showing message.")
+            print("No rows found. Showing message.")
             msg_label = tk.Label(
                 scroll_frame,
                 text="No rows found. Click 'Add Row' to insert one.",
@@ -1058,7 +1058,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                             config.PENDING_EDITS[key] = {}
 
                         config.PENDING_EDITS[key][col] = new_value
-                        print(f"📝 Staged edit for {key}: {col} = {new_value}")
+                        print(f"Staged edit for {key}: {col} = {new_value}")
                         # ✅ Only change bg if field is editable (state="normal")
                         try:
 
@@ -1066,7 +1066,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                                 row_widgets["CHECKBOX_WIDGET"].config(bg="#fef08a", activebackground="#fef08a")
 
                         except Exception as ex:
-                            print(f"⚠️ Could not update background color for {col} - {ex}")
+                            print(f"Could not update background color for {col} - {ex}")
                     entry.bind("<KeyRelease>", save_edit)
                     entry.bind("<FocusOut>", save_edit)
 
@@ -1278,8 +1278,6 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             status_label.config(text="No strategies available", fg="black")
         else:
             status_label.config(text=f"📈 {active} / {total} strategies active", fg="green" if active > 0 else "red")
-
-        # print(f"🟢 Updating strategy status: {active} / {total}")
 
     def refresh_tables(select_table_name=None):
         conn = db_handler.sqlite3.connect("users.db")
@@ -1549,7 +1547,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         global imp_exp_window
 
         if imp_exp_window and imp_exp_window.winfo_exists():
-            print("⚠️ System Config already open — focusing...")
+            print("System Config already open — focusing...")
             imp_exp_window.deiconify()
             imp_exp_window.lift()
             imp_exp_window.focus_force()
@@ -1610,7 +1608,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         global system_config_window
 
         if system_config_window and system_config_window.winfo_exists():
-            print("⚠️ System Config already open — focusing...")
+            print("System Config already open — focusing...")
             system_config_window.deiconify()
             system_config_window.lift()
             system_config_window.focus_force()
@@ -1904,14 +1902,14 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             config.AUTO_SAVE_INTERVAL_MS = int(config_data.get("auto_refresh_interval", 5)) * 60 * 1000
             config.AUTO_SAVE_ENABLED = config_data.get("auto_refresh_enabled", False)
         else:
-            print("⚠️ Config file not found.")
+            print("Config file not found.")
     except Exception as e:
-        print(f"❌ Config refresh error: {e}")
+        print(f"Config refresh error: {e}")
 
     print(f"[DEBUG] Interval (ms): {config.AUTO_SAVE_INTERVAL_MS}")
 
     if not getattr(config, "AUTO_SAVE_ENABLED", False):
-        print("🛑 Auto-save is disabled. Skipping.")
+        print("Auto-save is disabled. Skipping.")
         win.after(10000, auto_save_pending_rows)
         return
 
@@ -1924,7 +1922,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         elapsed = now - config.LAST_SAVE_TIMESTAMP
 
         if elapsed >= interval_sec:
-            print("⏳ Auto-saving triggered...")
+            print("Auto-saving triggered...")
 
             # ✅ Save pending new rows (only if present)
             if getattr(config, "AUTO_SAVE_ENABLED", False) and hasattr(config, "PENDING_ROWS") and config.PENDING_ROWS:
@@ -1938,24 +1936,24 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                     insert_sql = f'INSERT INTO "{physical_table}" ({quoted_columns}) VALUES ({placeholders})'
                     try:
                         cur.execute(insert_sql, [row[col] for col in columns])
-                        print(f"✅ Saved row to {physical_table}")
+                        print(f"Saved row to {physical_table}")
                     except Exception as e:
-                        print(f"❌ Failed to save row: {e}")
+                        print(f"Failed to save row: {e}")
                 conn.commit()
                 conn.close()
 
             # ✅ Save pending edits (always check separately)
             if getattr(config, "AUTO_SAVE_ENABLED", False) and hasattr(config, "PENDING_EDITS") and config.PENDING_EDITS:
-                print(f"📝 Flushing {len(config.PENDING_EDITS)} edited rows")
+                print(f"Flushing {len(config.PENDING_EDITS)} edited rows")
                 conn = db_handler.sqlite3.connect("users.db")
                 cur = conn.cursor()
                 for (physical_table, row_id), changes in config.PENDING_EDITS.items():
                     for col, value in changes.items():
                         try:
                             cur.execute(f'UPDATE "{physical_table}" SET "{col}" = ? WHERE ID = ?', (value, row_id))
-                            print(f"✅ Saved edit: {physical_table} [{row_id}]: {col} = {value}")
+                            print(f"Saved edit: {physical_table} [{row_id}]: {col} = {value}")
                         except Exception as e:
-                            print(f"❌ Failed to save edit: {physical_table} [{row_id}] {col}: {e}")
+                            print(f"Failed to save edit: {physical_table} [{row_id}] {col}: {e}")
                 conn.commit()
                 conn.close()
                 # 🔄 Reset UI color before clearing edits
@@ -1976,7 +1974,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             config.LAST_SAVE_TIMESTAMP = now
 
         else:
-            print(f"🕒 {int(interval_sec - elapsed)}s until next save")
+            print(f"{int(interval_sec - elapsed)}s until next save")
 
         win.after(10000, auto_save_pending_rows)
 
