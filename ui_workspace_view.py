@@ -1059,38 +1059,18 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
                         config.PENDING_EDITS[key][col] = new_value
                         print(f"📝 Staged edit for {key}: {col} = {new_value}")
+                        # ✅ Only change bg if field is editable (state="normal")
+                        try:
+
+                            if "CHECKBOX_WIDGET" in row_widgets:
+                                row_widgets["CHECKBOX_WIDGET"].config(bg="#fef08a", activebackground="#fef08a")
+
+                        except Exception as ex:
+                            print(f"⚠️ Could not update background color for {col} - {ex}")
                     entry.bind("<KeyRelease>", save_edit)
                     entry.bind("<FocusOut>", save_edit)
 
                 else:
-                    entry.config(state="readonly", readonlybackground=row_bg, fg="black")
-
-                # Apply validation if editable
-                if col_name in editable_cols:
-                    # Find column type from schema
-                    col_type = next((col['type'] for col in schema_data if col['name'] == col_name), "TEXT")
-                    vcmd = entry.register(create_validator(col_type))
-                    entry.config(validate="key", validatecommand=(vcmd, '%P'))
-                    def save_edit(event, col=col_name, row=row_id, e_widget=entry):
-                        new_value = e_widget.get()
-                        original_value = getattr(e_widget, "original_value", "")
-
-                        if new_value == original_value:
-                            return
-
-                        if not hasattr(config, "PENDING_EDITS"):
-                            config.PENDING_EDITS = {}
-
-                        key = (physical_table, row)
-                        if key not in config.PENDING_EDITS:
-                            config.PENDING_EDITS[key] = {}
-
-                        config.PENDING_EDITS[key][col] = new_value
-                        print(f"📝 Staged edit for {key}: {col} = {new_value}")
-                    entry.bind("<KeyRelease>", save_edit)
-                    entry.bind("<FocusOut>", save_edit)
-                else:
-                    # Make truly read-only (no cursor, no edits)
                     entry.config(state="readonly", readonlybackground=row_bg, fg="black")
 
                 if is_static:
@@ -1978,7 +1958,20 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                             print(f"❌ Failed to save edit: {physical_table} [{row_id}] {col}: {e}")
                 conn.commit()
                 conn.close()
-                config.PENDING_EDITS.clear()
+                # 🔄 Reset UI color before clearing edits
+            for (physical_table, row_id), changes in config.PENDING_EDITS.items():
+                widgets = entry_widgets_by_row_id.get(row_id, {})
+                for col in changes:
+                    if col in widgets and isinstance(widgets[col], tk.Entry):
+                        row_number = int(widgets[col].grid_info().get("row", 1))
+                        original_bg = "#f9fafb" if row_number % 2 == 0 else "#e5e7eb"
+
+                        # Reset checkbox background
+                        if "CHECKBOX_WIDGET" in widgets:
+                            widgets["CHECKBOX_WIDGET"].config(bg=original_bg, activebackground=original_bg)
+
+                        widgets[col].original_value = widgets[col].get()
+            config.PENDING_EDITS.clear()
 
             config.LAST_SAVE_TIMESTAMP = now
 
