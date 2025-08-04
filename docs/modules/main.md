@@ -22,3 +22,11 @@ Functional Workflow:
         Opens the Login Window using tkinter.
         Acts as the first screen users see to access their workspace and data.
 
+How It All Connects: 
+Module	                         |          Responsibility
+------------------------------------------------------------------------------------------------------------------------------
+db_handler	                     |          Sets up and manages the primary database (users.db).
+config	                         |          Holds global state like cached instruments and timers.
+20250606DB.db3	                 |          External database containing trading instruments (ResultSet table).
+ui_login	                     |          Launches the login interface.
+resource_path()	                 |          Ensures correct file paths (especially post-compilation).

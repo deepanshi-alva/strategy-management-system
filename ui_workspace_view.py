@@ -1957,19 +1957,19 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 conn.commit()
                 conn.close()
                 # 🔄 Reset UI color before clearing edits
-            for (physical_table, row_id), changes in config.PENDING_EDITS.items():
-                widgets = entry_widgets_by_row_id.get(row_id, {})
-                for col in changes:
-                    if col in widgets and isinstance(widgets[col], tk.Entry):
-                        row_number = int(widgets[col].grid_info().get("row", 1))
-                        original_bg = "#f9fafb" if row_number % 2 == 0 else "#e5e7eb"
+                for (physical_table, row_id), changes in config.PENDING_EDITS.items():
+                    widgets = entry_widgets_by_row_id.get(row_id, {})
+                    for col in changes:
+                        if col in widgets and isinstance(widgets[col], tk.Entry):
+                            row_number = int(widgets[col].grid_info().get("row", 1))
+                            original_bg = "#f9fafb" if row_number % 2 == 0 else "#e5e7eb"
 
-                        # Reset checkbox background
-                        if "CHECKBOX_WIDGET" in widgets:
-                            widgets["CHECKBOX_WIDGET"].config(bg=original_bg, activebackground=original_bg)
+                            # Reset checkbox background
+                            if "CHECKBOX_WIDGET" in widgets:
+                                widgets["CHECKBOX_WIDGET"].config(bg=original_bg, activebackground=original_bg)
 
-                        widgets[col].original_value = widgets[col].get()
-            config.PENDING_EDITS.clear()
+                            widgets[col].original_value = widgets[col].get()
+                config.PENDING_EDITS.clear()
 
             config.LAST_SAVE_TIMESTAMP = now
 

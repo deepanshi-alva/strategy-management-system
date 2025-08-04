@@ -12,6 +12,7 @@ def send_tcp_command(command_dict, callback=None, host='127.0.0.1', port=9999):
                 message = json.dumps(command_dict)
                 length_prefix = f"{len(message):04d}"
                 full_message = length_prefix + message
+                print("message send to the server", full_message)
                 sock.sendall(full_message.encode('utf-8'))
 
                 # Receive 4-byte length prefix
@@ -28,6 +29,7 @@ def send_tcp_command(command_dict, callback=None, host='127.0.0.1', port=9999):
                         break
                     response_data += chunk
 
+                print("this is the response that come from the server", response_data)
                 response = json.loads(response_data.decode('utf-8'))
 
                 if callback:

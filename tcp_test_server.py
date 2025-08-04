@@ -95,6 +95,7 @@ class TradingTCPServer:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
     def _handle_apply_strategy(self, data):
+        print("this is the data of the strategy which is being applied", data)
         strategy_id = f"{data.get('table_type', 'unknown')}_{data.get('row_id', 0)}"
         self.active_strategies[strategy_id] = {
             'start_time': datetime.now().isoformat(),
