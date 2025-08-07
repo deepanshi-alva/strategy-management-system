@@ -4,3 +4,4 @@ To show the yellow color in the first column of the row which is being editted u
 Then for setting the color of the particular row only we get the correct row widgets using row_id instead of grid_info. Then after saving the changes we just changed the color back to normal in the auto_save_pending_rows function
 
 7/8/25
+changed the configs path to make the auto save common for each and every workspace as it was taking the timer different for different workspaces so just to modify that we just remove the dependency over the workspace id

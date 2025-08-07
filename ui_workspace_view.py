@@ -481,7 +481,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     config.CURRENT_WORKSPACE_ID = workspace_id
 
     # Load system configuration for this user/workspace
-    config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
+    config_path = f"configs/user_{user_id}_config.json"
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             config_data = json.load(f)
@@ -1682,7 +1682,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
         # Set a default value for the spinbox
         timer_value_var.set("5") # Default to 5 minutes
 
-        config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
+        config_path = f"configs/user_{user_id}_config.json"
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
                 config_data = json.load(f)
@@ -1756,11 +1756,9 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 "auto_refresh_interval": interval
             }
 
-            #config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
             with open(config_path, "w") as f:
                 json.dump(config_data, f, indent=4)
 
-            # config_path = f"configs/user_{user_id}ws{workspace_id}_config.json"
             # 🔁 Update global config values
             config.AUTO_SAVE_ENABLED = enabled
             config.AUTO_SAVE_INTERVAL_MS = interval * 60 * 1000
@@ -1943,7 +1941,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     try:
         user_id = config.CURRENT_USER_ID
         workspace_id = config.CURRENT_WORKSPACE_ID
-        config_path = f"configs/user_{user_id}_ws_{workspace_id}_config.json"
+        config_path = f"configs/user_{user_id}_config.json"
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
                 config_data = json.load(f)
@@ -1958,8 +1956,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     if not getattr(config, "AUTO_SAVE_ENABLED", False):
         print("Auto-save is disabled. Skipping.")
-        win.after(10000, auto_save_pending_rows)
-        return
+        refresh_tables() 
+        return win 
 
     interval_sec = config.AUTO_SAVE_INTERVAL_MS / 1000
     print(f"[DEBUG] interval_sec = {interval_sec}")
