@@ -478,6 +478,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     entry_widgets_by_row_id = {}
 
     config.CURRENT_USER_ID = user_id
+    if not hasattr(config, "TABLE_UI_MEMORY"):
+        config.TABLE_UI_MEMORY = {}  # Key: "user_ws_table", Value: [list of dicts]
     config.CURRENT_WORKSPACE_ID = workspace_id
 
     # Load system configuration for this user/workspace
@@ -1012,6 +1014,14 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 pady=30,
                 sticky="nsew"
             )
+
+        memory_rows = []
+        for row in rows:
+            row_dict = dict(zip(col_names, row))
+            memory_rows.append(row_dict)
+
+        table_key = f"{user_id}_{workspace_id}_{table_name}"
+        config.TABLE_UI_MEMORY[table_key] = memory_rows
 
         for row_idx, row_data in enumerate(rows, start=1):
             row_bg = "#f9fafb" if row_idx % 2 == 0 else "#e5e7eb"
@@ -1769,7 +1779,7 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 win.after_cancel(config.AUTO_SAVE_JOB_ID)
 
             def rescheduled():
-                auto_save_pending_rows()
+                auto_save_all_tables()
             
             config.AUTO_SAVE_JOB_ID = win.after(1000, rescheduled)
 
@@ -1962,71 +1972,97 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     interval_sec = config.AUTO_SAVE_INTERVAL_MS / 1000
     print(f"[DEBUG] interval_sec = {interval_sec}")
 
-    def auto_save_pending_rows():
+    def auto_save_all_tables():
         now = time.time()
         interval_sec = config.AUTO_SAVE_INTERVAL_MS / 1000
         elapsed = now - config.LAST_SAVE_TIMESTAMP
 
-        if elapsed >= interval_sec:
-            print("Auto-saving triggered...")
+        if elapsed < interval_sec:
+            print(f"{int(interval_sec - elapsed)}s until next full save")
+            win.after(10000, auto_save_all_tables)
+            return
 
-            # ✅ Save pending new rows (only if present)
-            if getattr(config, "AUTO_SAVE_ENABLED", False) and hasattr(config, "PENDING_ROWS") and config.PENDING_ROWS:
-                conn = db_handler.sqlite3.connect("users.db")
-                cur = conn.cursor()
-                while config.PENDING_ROWS:
-                    physical_table, row = config.PENDING_ROWS.pop(0)
-                    columns = list(row.keys())
-                    placeholders = ",".join("?" for _ in columns)
-                    quoted_columns = ', '.join(f'"{col}"' for col in columns)
-                    insert_sql = f'INSERT INTO "{physical_table}" ({quoted_columns}) VALUES ({placeholders})'
+        print("🔄 Full auto-save triggered...")
+        try:
+            conn = db_handler.sqlite3.connect("users.db")
+            cur = conn.cursor()
+
+            cur.execute("SELECT workspace_id, user_id FROM user_tables GROUP BY workspace_id, user_id")
+            user_workspace_pairs = cur.fetchall()
+
+            for user_id, workspace_id in user_workspace_pairs:
+                cur.execute("SELECT table_name, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=?",
+                            (user_id, workspace_id))
+                tables = cur.fetchall()
+
+                for logical_name, physical_name in tables:
                     try:
-                        cur.execute(insert_sql, [row[col] for col in columns])
-                        print(f"Saved row to {physical_table}")
-                    except Exception as e:
-                        print(f"Failed to save row: {e}")
-                conn.commit()
-                conn.close()
+                        # Wipe table
+                        cur.execute(f'DELETE FROM "{physical_name}"')
+                        print(f"🧹 Cleared table: {physical_name}")
 
-            # ✅ Save pending edits (always check separately)
-            if getattr(config, "AUTO_SAVE_ENABLED", False) and hasattr(config, "PENDING_EDITS") and config.PENDING_EDITS:
-                print(f"Flushing {len(config.PENDING_EDITS)} edited rows")
-                conn = db_handler.sqlite3.connect("users.db")
-                cur = conn.cursor()
-                for (physical_table, row_id), changes in config.PENDING_EDITS.items():
-                    for col, value in changes.items():
-                        try:
-                            cur.execute(f'UPDATE "{physical_table}" SET "{col}" = ? WHERE ID = ?', (value, row_id))
-                            print(f"Saved edit: {physical_table} [{row_id}]: {col} = {value}")
-                        except Exception as e:
-                            print(f"Failed to save edit: {physical_table} [{row_id}] {col}: {e}")
-                conn.commit()
-                conn.close()
-                # 🔄 Reset UI color before clearing edits
+                        # Get schema
+                        cur.execute("SELECT schema FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
+                                    (user_id, workspace_id, logical_name))
+                        schema_json = cur.fetchone()[0]
+                        schema = json.loads(schema_json)
+
+                        all_columns = ["ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"]
+                        all_columns += [col["name"] for col in schema]
+
+                        table_key = f"{user_id}_{workspace_id}_{logical_name}"
+                        data_rows = config.TABLE_UI_MEMORY.get(table_key, [])
+
+                        # 🧠 Merge pending edits before saving
+                        if hasattr(config, "PENDING_EDITS"):
+                            for (ptbl, row_id), changes in config.PENDING_EDITS.items():
+                                if ptbl == physical_name:
+                                    for row in data_rows:
+                                        if str(row["ID"]) == str(row_id):
+                                            for col, value in changes.items():
+                                                row[col] = value  # 🔁 Apply pending change
+
+                        print("this is the data rows for the table", data_rows)
+
+                        for row in data_rows:
+                            quoted_columns = ", ".join(f'"{col}"' for col in all_columns)
+                            placeholders = ", ".join("?" for _ in all_columns)
+                            values = [row.get(col, "") for col in all_columns]
+                            cur.execute(f'INSERT INTO "{physical_name}" ({quoted_columns}) VALUES ({placeholders})', values)
+
+                        print(f"✅ Replaced all rows in: {logical_name}")
+                    except Exception as e:
+                        print(f"❌ Table save failed: {logical_name} — {e}")
+
+            conn.commit()
+            conn.close()
+
+            # ✅ Reset edited cell UI backgrounds + sync .original_value
+            if hasattr(config, "PENDING_EDITS"):
                 for (physical_table, row_id), changes in config.PENDING_EDITS.items():
                     widgets = entry_widgets_by_row_id.get(row_id, {})
                     if widgets:
-                        # ✅ FIX: Use the stored row background instead of calculating from grid_info
                         original_bg = widgets.get("__row_bg", "#f9fafb")
-                        
-                        # Reset checkbox background to original
                         if "CHECKBOX_WIDGET" in widgets:
                             widgets["CHECKBOX_WIDGET"].config(bg=original_bg, activebackground=original_bg)
-                        
-                        # Update original values for all changed columns
                         for col in changes:
                             if col in widgets and isinstance(widgets[col], tk.Entry):
                                 widgets[col].original_value = widgets[col].get()
-                config.PENDING_EDITS.clear()
+
+            # 🧹 Clear both pending caches
+            config.PENDING_EDITS.clear()
+            config.PENDING_ROWS.clear()
 
             config.LAST_SAVE_TIMESTAMP = now
+            print("✅ All tables and edits flushed.")
 
-        else:
-            print(f"{int(interval_sec - elapsed)}s until next save")
+        except Exception as e:
+            print(f"🔥 Auto-save error: {e}")
 
-        win.after(10000, auto_save_pending_rows)
+    win.after(10000, auto_save_all_tables)
 
-    win.after(config.AUTO_SAVE_INTERVAL_MS, auto_save_pending_rows)
+
+    win.after(config.AUTO_SAVE_INTERVAL_MS, auto_save_all_tables)
 
     refresh_tables()
 
