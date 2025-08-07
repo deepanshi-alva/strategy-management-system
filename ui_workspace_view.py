@@ -882,6 +882,8 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             rows = cur.fetchall()
             col_names = [desc[0] for desc in cur.description]
             conn.close()
+            # ADD: Convert rows to mutable list of lists for editing
+            rows = [list(row) for row in rows]
             if hasattr(config, "PENDING_ROWS"):
                 for ptbl, row_dict in config.PENDING_ROWS:
                     if ptbl == physical_table:
@@ -897,6 +899,22 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                             if not found:
                                 pending_row.append("")
                         rows.append(pending_row)
+
+            # ADD: Apply pending edits to the displayed data
+            if hasattr(config, "PENDING_EDITS") and config.PENDING_EDITS:
+                col_indices = {name: idx for idx, name in enumerate(col_names)}
+                
+                for (ptbl, row_id), changes in config.PENDING_EDITS.items():
+                    if ptbl == physical_table:  # Only apply edits for current table
+                        # Find the row with matching ID
+                        for row_idx, row_data in enumerate(rows):
+                            if str(row_data[col_indices.get("ID")]) == str(row_id):
+                                # Apply each pending change to this row
+                                for col_name, new_value in changes.items():
+                                    if col_name in col_indices:
+                                        rows[row_idx][col_indices[col_name]] = new_value
+                                        print(f"Applied pending edit to display: {row_id}.{col_name} = {new_value}")
+                                break
 
         except Exception as e:
             conn.close()
@@ -999,11 +1017,26 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             row_bg = "#f9fafb" if row_idx % 2 == 0 else "#e5e7eb"
             row_widgets = {}
             row_id = row_data[col_indices.get("ID")]
+
+            # ADD: Check if this row has pending edits
+            has_pending_edits = False
+            pending_edit_cols = set()
+
+            if hasattr(config, "PENDING_EDITS"):
+                for (ptbl, pid), changes in config.PENDING_EDITS.items():
+                    if ptbl == physical_table and str(pid) == str(row_id):
+                        has_pending_edits = True
+                        pending_edit_cols = set(changes.keys())
+                        break
             
             # Add checkbox for selection
             status_value = str(row_data[col_indices.get("STATUS", -1)]).upper()
             selected_var = tk.IntVar(value=1 if status_value == "ACTIVE" else 0)
-            cb_color = "#bbf7d0" if status_value == "ACTIVE" else row_bg
+            # MODIFY: Set checkbox background if row has pending edits
+            if has_pending_edits:
+                cb_color = "#fef08a"  # Yellow for pending edits
+            else:
+                cb_color = "#bbf7d0" if status_value == "ACTIVE" else row_bg
             cb = tk.Checkbutton(scroll_frame, variable=selected_var, bg=cb_color, activebackground=cb_color, bd=0, highlightthickness=0, relief="flat")
             def on_checkbox_toggle(row_id=row_id, var=selected_var):
                 if var.get():
@@ -1036,6 +1069,24 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 entry.insert(0, "" if val is None else str(val))
                 entry.original_value = "" if val is None else str(val)
 
+                if hasattr(config, "PENDING_EDITS"):
+                    # Find original DB value for this cell
+                    original_val = None
+                    try:
+                        conn_temp = db_handler.sqlite3.connect("users.db")
+                        cur_temp = conn_temp.cursor()
+                        cur_temp.execute(f'SELECT "{col_name}" FROM "{physical_table}" WHERE ID = ?', (row_id,))
+                        result = cur_temp.fetchone()
+                        if result:
+                            original_val = result[0]
+                        conn_temp.close()
+                    except:
+                        original_val = None
+                    
+                    entry.original_value = "" if original_val is None else str(original_val)
+                else:
+                    entry.original_value = "" if val is None else str(val)
+
                 # Apply validation if editable
                 is_subscription = any(col["name"] == col_name and col.get("subscription") for col in schema_data)
                 if col_name in editable_cols or is_subscription:
@@ -1059,14 +1110,11 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
                         config.PENDING_EDITS[key][col] = new_value
                         print(f"Staged edit for {key}: {col} = {new_value}")
-                        # ✅ Only change bg if field is editable (state="normal")
-                        try:
 
-                            if "CHECKBOX_WIDGET" in row_widgets:
-                                row_widgets["CHECKBOX_WIDGET"].config(bg="#fef08a", activebackground="#fef08a")
-
-                        except Exception as ex:
-                            print(f"Could not update background color for {col} - {ex}")
+                        # FIX: Get the correct row widgets using row_id instead of grid_info
+                        row_widgets = entry_widgets_by_row_id.get(row)
+                        if row_widgets and "CHECKBOX_WIDGET" in row_widgets:
+                            row_widgets["CHECKBOX_WIDGET"].config(bg="#fef08a", activebackground="#fef08a")
                     entry.bind("<KeyRelease>", save_edit)
                     entry.bind("<FocusOut>", save_edit)
 
@@ -1959,16 +2007,18 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                 # 🔄 Reset UI color before clearing edits
                 for (physical_table, row_id), changes in config.PENDING_EDITS.items():
                     widgets = entry_widgets_by_row_id.get(row_id, {})
-                    for col in changes:
-                        if col in widgets and isinstance(widgets[col], tk.Entry):
-                            row_number = int(widgets[col].grid_info().get("row", 1))
-                            original_bg = "#f9fafb" if row_number % 2 == 0 else "#e5e7eb"
-
-                            # Reset checkbox background
-                            if "CHECKBOX_WIDGET" in widgets:
-                                widgets["CHECKBOX_WIDGET"].config(bg=original_bg, activebackground=original_bg)
-
-                            widgets[col].original_value = widgets[col].get()
+                    if widgets:
+                        # ✅ FIX: Use the stored row background instead of calculating from grid_info
+                        original_bg = widgets.get("__row_bg", "#f9fafb")
+                        
+                        # Reset checkbox background to original
+                        if "CHECKBOX_WIDGET" in widgets:
+                            widgets["CHECKBOX_WIDGET"].config(bg=original_bg, activebackground=original_bg)
+                        
+                        # Update original values for all changed columns
+                        for col in changes:
+                            if col in widgets and isinstance(widgets[col], tk.Entry):
+                                widgets[col].original_value = widgets[col].get()
                 config.PENDING_EDITS.clear()
 
             config.LAST_SAVE_TIMESTAMP = now
