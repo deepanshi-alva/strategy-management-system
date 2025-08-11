@@ -16,11 +16,144 @@ table_actions_popup = None  # Add at module level
 system_config_window = None
 imp_exp_window = None
 
+# Global auto-save management
+GLOBAL_AUTO_SAVE_JOB_ID = None
+GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES = set()
+MASTER_WINDOW_REF = None
+
 def get_next_session_id():
     session_id = config.GLOBAL_SESSION_COUNTER
     config.GLOBAL_SESSION_COUNTER += 1
 
     return session_id
+
+def global_auto_save_all_workspaces():
+    """Global auto-save function that saves all active workspaces"""
+    global GLOBAL_AUTO_SAVE_JOB_ID, MASTER_WINDOW_REF
+    
+    if not getattr(config, "AUTO_SAVE_ENABLED", False):
+        print("Global auto-save is disabled. Skipping.")
+        return
+    
+    print("🔄 Global auto-save triggered for all workspaces...")
+    
+    try:
+        conn = db_handler.sqlite3.connect("users.db")
+        cur = conn.cursor()
+        
+        # Get all workspace IDs that have active windows
+        for workspace_id in GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES.copy():
+            workspace_key = f"ws_{workspace_id}"
+            
+            print(f"🔄 Processing workspace {workspace_id}...")
+            
+            # Get all tables for this workspace
+            cur.execute("""SELECT user_id, table_name, physical_table_name, schema 
+                          FROM user_tables WHERE workspace_id=?""", (workspace_id,))
+            tables = cur.fetchall()
+            
+            if not tables:
+                print(f"[WS-{workspace_id}] No tables found, skipping...")
+                continue
+            
+            for user_id_db, logical_name, physical_name, schema_json in tables:
+                try:
+                    # Clear existing data
+                    cur.execute(f'DELETE FROM "{physical_name}"')
+                    print(f"🧹 [WS-{workspace_id}] Cleared table: {physical_name}")
+
+                    # Get schema
+                    schema = json.loads(schema_json)
+                    all_columns = ["ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"]
+                    all_columns += [col["name"] for col in schema]
+
+                    # Get data from workspace-specific memory
+                    table_key = f"{user_id_db}_{workspace_id}_{logical_name}"
+                    data_rows = []
+                    
+                    if workspace_key in config.WORKSPACE_TABLE_MEMORY:
+                        data_rows = config.WORKSPACE_TABLE_MEMORY[workspace_key].get(table_key, [])
+
+                    # Apply workspace-specific pending edits before saving
+                    if workspace_key in config.WORKSPACE_PENDING_EDITS:
+                        workspace_edits = config.WORKSPACE_PENDING_EDITS[workspace_key]
+                        for (ptbl, row_id), changes in workspace_edits.items():
+                            if ptbl == physical_name:
+                                for row in data_rows:
+                                    if str(row["ID"]) == str(row_id):
+                                        for col, value in changes.items():
+                                            row[col] = value
+                                        break
+
+                    print(f"[WS-{workspace_id}] Saving {len(data_rows)} rows to {logical_name}")
+
+                    # Insert all rows
+                    for row in data_rows:
+                        quoted_columns = ", ".join(f'"{col}"' for col in all_columns)
+                        placeholders = ", ".join("?" for _ in all_columns)
+                        values = [row.get(col, "") for col in all_columns]
+                        cur.execute(f'INSERT INTO "{physical_name}" ({quoted_columns}) VALUES ({placeholders})', values)
+
+                    print(f"✅ [WS-{workspace_id}] Saved table: {logical_name}")
+
+                except Exception as e:
+                    print(f"❌ [WS-{workspace_id}] Table save failed: {logical_name} — {e}")
+
+            # Clear workspace-specific pending edits after successful save
+            if workspace_key in config.WORKSPACE_PENDING_EDITS:
+                config.WORKSPACE_PENDING_EDITS[workspace_key].clear()
+                print(f"✅ [WS-{workspace_id}] Cleared pending edits")
+
+            # 🔄 Reset UI row highlights for this workspace after save
+            if workspace_id in GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES:
+                try:
+                    for (user_id_db, logical_name, physical_name, schema_json) in tables:
+                        table_key = f"{user_id_db}_{workspace_id}_{logical_name}"
+                        if workspace_key in config.WORKSPACE_TABLE_MEMORY:
+                            rows_in_memory = config.WORKSPACE_TABLE_MEMORY[workspace_key].get(table_key, [])
+                            for row_dict in rows_in_memory:
+                                row_id = row_dict.get("ID")
+                                widgets = None
+                                # entry_widgets_by_row_id is defined in open_workspace_layout scope
+                                # So store a global mapping to access here
+                                if hasattr(config, "ENTRY_WIDGETS_GLOBAL") and workspace_id in config.ENTRY_WIDGETS_GLOBAL:
+                                    widgets = config.ENTRY_WIDGETS_GLOBAL[workspace_id].get(row_id, {})
+                                if widgets and "CHECKBOX_WIDGET" in widgets:
+                                    row_index = int(widgets["CHECKBOX_WIDGET"].grid_info().get("row", 1))
+                                    original_bg = "#f9fafb" if row_index % 2 == 0 else "#e5e7eb"
+                                    widgets["CHECKBOX_WIDGET"].config(bg=original_bg, activebackground=original_bg)
+                except Exception as e:
+                    print(f"Warning: Could not reset UI colors for WS-{workspace_id}: {e}")
+
+            # Clear workspace-specific pending rows
+            if hasattr(config, "PENDING_ROWS"):
+                # Filter out rows that belong to this workspace
+                remaining_rows = []
+                workspace_table_names = {physical_name for _, _, physical_name, _ in tables}
+                
+                for ptbl, row_dict in config.PENDING_ROWS:
+                    if ptbl not in workspace_table_names:
+                        remaining_rows.append((ptbl, row_dict))
+                
+                config.PENDING_ROWS = remaining_rows
+                print(f"✅ [WS-{workspace_id}] Cleared pending rows")
+
+            print(f"✅ [WS-{workspace_id}] Workspace save completed")
+
+        conn.commit()
+        conn.close()
+        
+        config.LAST_SAVE_TIMESTAMP = time.time()
+        print("✅ Global auto-save completed for all workspaces")
+
+    except Exception as e:
+        print(f"🔥 Global auto-save error: {e}")
+    
+    # Schedule next save
+    if GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES and MASTER_WINDOW_REF:
+        interval_ms = getattr(config, "AUTO_SAVE_INTERVAL_MS", 300000)
+        GLOBAL_AUTO_SAVE_JOB_ID = MASTER_WINDOW_REF.after(interval_ms, global_auto_save_all_workspaces)
+        print(f"Scheduled next global auto-save in {interval_ms}ms")
 
 # Constants
 TABLE_ACTIONS = ["Export Schema", "Import Schema", "Export Table", "Import Table", "Set Default", "New Table", "Edit Table", "Add Row", "Start All", "Stop All"]
@@ -478,9 +611,23 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     entry_widgets_by_row_id = {}
 
     config.CURRENT_USER_ID = user_id
-    if not hasattr(config, "TABLE_UI_MEMORY"):
-        config.TABLE_UI_MEMORY = {}  # Key: "user_ws_table", Value: [list of dicts]
     config.CURRENT_WORKSPACE_ID = workspace_id
+
+    # Store reference globally so we can access in auto-save reset
+    if not hasattr(config, "ENTRY_WIDGETS_GLOBAL"):
+        config.ENTRY_WIDGETS_GLOBAL = {}
+    config.ENTRY_WIDGETS_GLOBAL[workspace_id] = entry_widgets_by_row_id
+
+    workspace_memory_key = f"ws_{workspace_id}"
+    if not hasattr(config, "WORKSPACE_TABLE_MEMORY"):
+        config.WORKSPACE_TABLE_MEMORY = {}
+    if workspace_memory_key not in config.WORKSPACE_TABLE_MEMORY:
+        config.WORKSPACE_TABLE_MEMORY[workspace_memory_key] = {}
+
+    if not hasattr(config, "WORKSPACE_PENDING_EDITS"):
+        config.WORKSPACE_PENDING_EDITS = {}
+    if workspace_memory_key not in config.WORKSPACE_PENDING_EDITS:
+        config.WORKSPACE_PENDING_EDITS[workspace_memory_key] = {}
 
     # Load system configuration for this user/workspace
     config_path = f"configs/user_{user_id}_config.json"
@@ -499,6 +646,11 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     fg_color = "black" if theme == "light" else "white"
 
     win = tk.Toplevel(master=master_win)
+    # Register this workspace for global auto-save
+    global GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES, MASTER_WINDOW_REF
+    GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES.add(workspace_id)
+    MASTER_WINDOW_REF = win  # Use this window as master for scheduling
+    print(f"Registered workspace {workspace_id} for global auto-save")
     win.title(name)
     win.attributes("-fullscreen", True)
 
@@ -557,21 +709,30 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             conn.close()
             print("All unsaved data flushed.")
 
-        # Save all pending edits before closing
-        if hasattr(config, "PENDING_EDITS") and config.PENDING_EDITS:
-            print(f"Saving {len(config.PENDING_EDITS)} pending edits before close...")
+        # Save workspace-specific pending edits before closing
+        workspace_key = f"ws_{workspace_id}"
+        if workspace_key in config.WORKSPACE_PENDING_EDITS and config.WORKSPACE_PENDING_EDITS[workspace_key]:
+            print(f"Saving {len(config.WORKSPACE_PENDING_EDITS[workspace_key])} pending edits for workspace {workspace_id} before close...")
             conn = db_handler.sqlite3.connect("users.db")
             cur = conn.cursor()
-            for (physical_table, row_id), changes in config.PENDING_EDITS.items():
+            
+            for (physical_table, row_id), changes in config.WORKSPACE_PENDING_EDITS[workspace_key].items():
                 for col, value in changes.items():
                     try:
                         cur.execute(f'UPDATE "{physical_table}" SET "{col}" = ? WHERE ID = ?', (value, row_id))
-                        print(f"Saved edit on close: {physical_table} [{row_id}]: {col} = {value}")
+                        print(f"Saved edit on close for workspace {workspace_id}: {physical_table} [{row_id}]: {col} = {value}")
                     except Exception as e:
-                        print(f"Failed to save edit on close: {physical_table} [{row_id}] {col}: {e}")
+                        print(f"Failed to save edit on close for workspace {workspace_id}: {e}")
+            
             conn.commit()
             conn.close()
-            config.PENDING_EDITS.clear()
+            
+            # Clear workspace-specific pending edits
+            del config.WORKSPACE_PENDING_EDITS[workspace_key]
+
+        # Clear workspace-specific memory
+        if workspace_key in config.WORKSPACE_TABLE_MEMORY:
+            del config.WORKSPACE_TABLE_MEMORY[workspace_key]
 
         cleanup_window(win)
         win.destroy()
@@ -902,11 +1063,12 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                                 pending_row.append("")
                         rows.append(pending_row)
 
-            # ADD: Apply pending edits to the displayed data
-            if hasattr(config, "PENDING_EDITS") and config.PENDING_EDITS:
+            # Apply workspace-specific pending edits to the displayed data
+            workspace_key = f"ws_{workspace_id}"
+            if workspace_key in config.WORKSPACE_PENDING_EDITS and config.WORKSPACE_PENDING_EDITS[workspace_key]:
                 col_indices = {name: idx for idx, name in enumerate(col_names)}
                 
-                for (ptbl, row_id), changes in config.PENDING_EDITS.items():
+                for (ptbl, row_id), changes in config.WORKSPACE_PENDING_EDITS[workspace_key].items():
                     if ptbl == physical_table:  # Only apply edits for current table
                         # Find the row with matching ID
                         for row_idx, row_data in enumerate(rows):
@@ -1021,19 +1183,21 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             memory_rows.append(row_dict)
 
         table_key = f"{user_id}_{workspace_id}_{table_name}"
-        config.TABLE_UI_MEMORY[table_key] = memory_rows
+        workspace_key = f"ws_{workspace_id}"
+        config.WORKSPACE_TABLE_MEMORY[workspace_key][table_key] = memory_rows
 
         for row_idx, row_data in enumerate(rows, start=1):
             row_bg = "#f9fafb" if row_idx % 2 == 0 else "#e5e7eb"
             row_widgets = {}
             row_id = row_data[col_indices.get("ID")]
 
-            # ADD: Check if this row has pending edits
+            # Check if this row has pending edits in this workspace
             has_pending_edits = False
             pending_edit_cols = set()
 
-            if hasattr(config, "PENDING_EDITS"):
-                for (ptbl, pid), changes in config.PENDING_EDITS.items():
+            workspace_key = f"ws_{workspace_id}"
+            if workspace_key in config.WORKSPACE_PENDING_EDITS:
+                for (ptbl, pid), changes in config.WORKSPACE_PENDING_EDITS[workspace_key].items():
                     if ptbl == physical_table and str(pid) == str(row_id):
                         has_pending_edits = True
                         pending_edit_cols = set(changes.keys())
@@ -1111,17 +1275,18 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
                         if new_value == original_value:
                             return
                         
-                        if not hasattr(config, "PENDING_EDITS"):
-                            config.PENDING_EDITS = {}
+                        workspace_key = f"ws_{workspace_id}"
+                        if workspace_key not in config.WORKSPACE_PENDING_EDITS:
+                            config.WORKSPACE_PENDING_EDITS[workspace_key] = {}
 
                         key = (physical_table, row)
-                        if key not in config.PENDING_EDITS:
-                            config.PENDING_EDITS[key] = {}
+                        if key not in config.WORKSPACE_PENDING_EDITS[workspace_key]:
+                            config.WORKSPACE_PENDING_EDITS[workspace_key][key] = {}
 
-                        config.PENDING_EDITS[key][col] = new_value
-                        print(f"Staged edit for {key}: {col} = {new_value}")
+                        config.WORKSPACE_PENDING_EDITS[workspace_key][key][col] = new_value
+                        print(f"Staged edit for workspace {workspace_id}, {key}: {col} = {new_value}")
 
-                        # FIX: Get the correct row widgets using row_id instead of grid_info
+                        # Update UI to show pending edit
                         row_widgets = entry_widgets_by_row_id.get(row)
                         if row_widgets and "CHECKBOX_WIDGET" in row_widgets:
                             row_widgets["CHECKBOX_WIDGET"].config(bg="#fef08a", activebackground="#fef08a")
@@ -1778,10 +1943,10 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
             if config.AUTO_SAVE_JOB_ID:
                 win.after_cancel(config.AUTO_SAVE_JOB_ID)
 
-            def rescheduled():
-                auto_save_all_tables()
+            # def rescheduled():
+            #     global_auto_save_all_workspaces()
             
-            config.AUTO_SAVE_JOB_ID = win.after(1000, rescheduled)
+            # config.AUTO_SAVE_JOB_ID = win.after(1000, rescheduled)
 
             messagebox.showinfo("Settings Saved",
                                 f"Timer Enabled: {enabled}\n"
@@ -1927,9 +2092,31 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     pending_label.pack(side="right", padx=10)
 
     def update_pending_count():
-        count = len(getattr(config, "PENDING_ROWS", []))
-        edit_count = len(getattr(config, "PENDING_EDITS", {}))
-        pending_label.config(text=f"⏱ Pending: {count} rows / {edit_count} edits")
+        workspace_key = f"ws_{workspace_id}"
+        
+        # Count workspace-specific pending rows
+        workspace_pending_rows = 0
+        if hasattr(config, "PENDING_ROWS"):
+            try:
+                conn = db_handler.sqlite3.connect("users.db")
+                cur = conn.cursor()
+                cur.execute("SELECT physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=?",
+                        (user_id, workspace_id))
+                workspace_tables = {row[0] for row in cur.fetchall()}
+                conn.close()
+                
+                for ptbl, _ in config.PENDING_ROWS:
+                    if ptbl in workspace_tables:
+                        workspace_pending_rows += 1
+            except:
+                pass
+        
+        # Count workspace-specific pending edits
+        workspace_edit_count = 0
+        if workspace_key in config.WORKSPACE_PENDING_EDITS:
+            workspace_edit_count = len(config.WORKSPACE_PENDING_EDITS[workspace_key])
+        
+        pending_label.config(text=f"⏱ WS-{workspace_id} Pending: {workspace_pending_rows} rows / {workspace_edit_count} edits")
         win.after(1000, update_pending_count)
 
     update_pending_count()
@@ -1942,10 +2129,10 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
 
     update_timer_from_global()
 
-    # Auto-save configuration from config file (already loaded)
+    # Auto-save configuration from config file
     config.AUTO_SAVE_INTERVAL_MS = int(config_data.get("auto_refresh_interval", 5)) * 60 * 1000
     config.AUTO_SAVE_ENABLED = config_data.get("auto_refresh_enabled", False)
-    config.PENDING_ROWS = []
+    config.PENDING_ROWS = getattr(config, "PENDING_ROWS", [])
     config.LAST_SAVE_TIMESTAMP = time.time()
 
     try:
@@ -1962,107 +2149,17 @@ def open_workspace_layout(workspace_id, email, master_win=None, on_close_callbac
     except Exception as e:
         print(f"Config refresh error: {e}")
 
+    print(f"[DEBUG] Global auto-save enabled: {config.AUTO_SAVE_ENABLED}")
     print(f"[DEBUG] Interval (ms): {config.AUTO_SAVE_INTERVAL_MS}")
 
-    if not getattr(config, "AUTO_SAVE_ENABLED", False):
-        print("Auto-save is disabled. Skipping.")
-        refresh_tables() 
-        return win 
-
-    interval_sec = config.AUTO_SAVE_INTERVAL_MS / 1000
-    print(f"[DEBUG] interval_sec = {interval_sec}")
-
-    def auto_save_all_tables():
-        now = time.time()
-        interval_sec = config.AUTO_SAVE_INTERVAL_MS / 1000
-        elapsed = now - config.LAST_SAVE_TIMESTAMP
-
-        if elapsed < interval_sec:
-            print(f"{int(interval_sec - elapsed)}s until next full save")
-            win.after(10000, auto_save_all_tables)
-            return
-
-        print("🔄 Full auto-save triggered...")
-        try:
-            conn = db_handler.sqlite3.connect("users.db")
-            cur = conn.cursor()
-
-            cur.execute("SELECT workspace_id, user_id FROM user_tables GROUP BY workspace_id, user_id")
-            user_workspace_pairs = cur.fetchall()
-
-            for user_id, workspace_id in user_workspace_pairs:
-                cur.execute("SELECT table_name, physical_table_name FROM user_tables WHERE user_id=? AND workspace_id=?",
-                            (user_id, workspace_id))
-                tables = cur.fetchall()
-
-                for logical_name, physical_name in tables:
-                    try:
-                        # Wipe table
-                        cur.execute(f'DELETE FROM "{physical_name}"')
-                        print(f"🧹 Cleared table: {physical_name}")
-
-                        # Get schema
-                        cur.execute("SELECT schema FROM user_tables WHERE user_id=? AND workspace_id=? AND table_name=?",
-                                    (user_id, workspace_id, logical_name))
-                        schema_json = cur.fetchone()[0]
-                        schema = json.loads(schema_json)
-
-                        all_columns = ["ID", "STRATEGY", "TABLE", "STATUS", "InstrumentToken", "InstrumentID", "InstrumentName"]
-                        all_columns += [col["name"] for col in schema]
-
-                        table_key = f"{user_id}_{workspace_id}_{logical_name}"
-                        data_rows = config.TABLE_UI_MEMORY.get(table_key, [])
-
-                        # 🧠 Merge pending edits before saving
-                        if hasattr(config, "PENDING_EDITS"):
-                            for (ptbl, row_id), changes in config.PENDING_EDITS.items():
-                                if ptbl == physical_name:
-                                    for row in data_rows:
-                                        if str(row["ID"]) == str(row_id):
-                                            for col, value in changes.items():
-                                                row[col] = value  # 🔁 Apply pending change
-
-                        print("this is the data rows for the table", data_rows)
-
-                        for row in data_rows:
-                            quoted_columns = ", ".join(f'"{col}"' for col in all_columns)
-                            placeholders = ", ".join("?" for _ in all_columns)
-                            values = [row.get(col, "") for col in all_columns]
-                            cur.execute(f'INSERT INTO "{physical_name}" ({quoted_columns}) VALUES ({placeholders})', values)
-
-                        print(f"✅ Replaced all rows in: {logical_name}")
-                    except Exception as e:
-                        print(f"❌ Table save failed: {logical_name} — {e}")
-
-            conn.commit()
-            conn.close()
-
-            # ✅ Reset edited cell UI backgrounds + sync .original_value
-            if hasattr(config, "PENDING_EDITS"):
-                for (physical_table, row_id), changes in config.PENDING_EDITS.items():
-                    widgets = entry_widgets_by_row_id.get(row_id, {})
-                    if widgets:
-                        original_bg = widgets.get("__row_bg", "#f9fafb")
-                        if "CHECKBOX_WIDGET" in widgets:
-                            widgets["CHECKBOX_WIDGET"].config(bg=original_bg, activebackground=original_bg)
-                        for col in changes:
-                            if col in widgets and isinstance(widgets[col], tk.Entry):
-                                widgets[col].original_value = widgets[col].get()
-
-            # 🧹 Clear both pending caches
-            config.PENDING_EDITS.clear()
-            config.PENDING_ROWS.clear()
-
-            config.LAST_SAVE_TIMESTAMP = now
-            print("✅ All tables and edits flushed.")
-
-        except Exception as e:
-            print(f"🔥 Auto-save error: {e}")
-
-    win.after(10000, auto_save_all_tables)
-
-
-    win.after(config.AUTO_SAVE_INTERVAL_MS, auto_save_all_tables)
+    # Start global auto-save timer only if this is the first workspace and auto-save is enabled
+    if len(GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES) == 1 and config.AUTO_SAVE_ENABLED:
+        print(f"Starting global auto-save timer with interval {config.AUTO_SAVE_INTERVAL_MS}ms")
+        GLOBAL_AUTO_SAVE_JOB_ID = win.after(config.AUTO_SAVE_INTERVAL_MS, global_auto_save_all_workspaces)
+    elif not config.AUTO_SAVE_ENABLED:
+        print("Auto-save is disabled. No timer started.")
+    else:
+        print(f"Global auto-save already running for {len(GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES)} workspaces")
 
     refresh_tables()
 
