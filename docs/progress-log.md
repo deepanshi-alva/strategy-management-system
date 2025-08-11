@@ -26,6 +26,8 @@ then in the update_table_display we have applied the workspace specific pending 
 
 then we have made the certain change in the ui for the edit thing where yellow color is being shown in the bg of the checkbox to show that something is being edited in this row  
 
+made the ui of the product page of the solar website
+
 -------------------------------------------------------------------------------------------------
 
 11/8/25
@@ -35,3 +37,4 @@ changes the function update_pending_count and then removed the function auto_sav
 
 now the only issue which i am seeing still presist in the system is that if we have multiple tables in the workspace the table which are opened only those table data is being there in the storage so the once whose ui is not opened yet but that table has data that tables data will become null as its i is not open in the storage we have null data for this table and thus according to our algo we will delete the table and then insert the new table which will be empty in this case
 
+working on the product page of the solar website
