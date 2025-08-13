@@ -49,3 +49,4 @@ I was on leave
 13/8/25
 todays aim is to remove the error from the strategy manager and complete the product page of the solar website 
 
+so i have implemented the solution for the strategy manager error where we are only saving those tables whose data is there in the memory except that we are ignoring all the tables for this implementation i made the changes in the global_auto_save_all_workspaces function 
