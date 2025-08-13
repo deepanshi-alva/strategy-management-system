@@ -47,6 +47,11 @@ def global_auto_save_all_workspaces():
             
             print(f"🔄 Processing workspace {workspace_id}...")
             
+            # Check if this workspace has any data in memory
+            if workspace_key not in config.WORKSPACE_TABLE_MEMORY:
+                print(f"[WS-{workspace_id}] No data in memory, skipping...")
+                continue
+            
             # Get all tables for this workspace
             cur.execute("""SELECT user_id, table_name, physical_table_name, schema 
                           FROM user_tables WHERE workspace_id=?""", (workspace_id,))
@@ -56,9 +61,22 @@ def global_auto_save_all_workspaces():
                 print(f"[WS-{workspace_id}] No tables found, skipping...")
                 continue
             
+            # Only process tables that have data in memory
+            tables_with_memory_data = []
             for user_id_db, logical_name, physical_name, schema_json in tables:
+                table_key = f"{user_id_db}_{workspace_id}_{logical_name}"
+                if table_key in config.WORKSPACE_TABLE_MEMORY[workspace_key]:
+                    tables_with_memory_data.append((user_id_db, logical_name, physical_name, schema_json))
+                else:
+                    print(f"[WS-{workspace_id}] Table {logical_name} has no memory data, skipping...")
+            
+            if not tables_with_memory_data:
+                print(f"[WS-{workspace_id}] No tables with memory data found, skipping...")
+                continue
+            
+            for user_id_db, logical_name, physical_name, schema_json in tables_with_memory_data:
                 try:
-                    # Clear existing data
+                    # Clear existing data ONLY for tables that have memory data
                     cur.execute(f'DELETE FROM "{physical_name}"')
                     print(f"🧹 [WS-{workspace_id}] Cleared table: {physical_name}")
 
@@ -69,10 +87,7 @@ def global_auto_save_all_workspaces():
 
                     # Get data from workspace-specific memory
                     table_key = f"{user_id_db}_{workspace_id}_{logical_name}"
-                    data_rows = []
-                    
-                    if workspace_key in config.WORKSPACE_TABLE_MEMORY:
-                        data_rows = config.WORKSPACE_TABLE_MEMORY[workspace_key].get(table_key, [])
+                    data_rows = config.WORKSPACE_TABLE_MEMORY[workspace_key].get(table_key, [])
 
                     # Apply workspace-specific pending edits before saving
                     if workspace_key in config.WORKSPACE_PENDING_EDITS:
@@ -97,7 +112,7 @@ def global_auto_save_all_workspaces():
                     print(f"✅ [WS-{workspace_id}] Saved table: {logical_name}")
 
                 except Exception as e:
-                    print(f"❌ [WS-{workspace_id}] Table save failed: {logical_name} — {e}")
+                    print(f"❌ [WS-{workspace_id}] Table save failed: {logical_name} – {e}")
 
             # Clear workspace-specific pending edits after successful save
             if workspace_key in config.WORKSPACE_PENDING_EDITS:
@@ -107,7 +122,7 @@ def global_auto_save_all_workspaces():
             # 🔄 Reset UI row highlights for this workspace after save
             if workspace_id in GLOBAL_AUTO_SAVE_ACTIVE_WORKSPACES:
                 try:
-                    for (user_id_db, logical_name, physical_name, schema_json) in tables:
+                    for (user_id_db, logical_name, physical_name, schema_json) in tables_with_memory_data:
                         table_key = f"{user_id_db}_{workspace_id}_{logical_name}"
                         if workspace_key in config.WORKSPACE_TABLE_MEMORY:
                             rows_in_memory = config.WORKSPACE_TABLE_MEMORY[workspace_key].get(table_key, [])
@@ -125,18 +140,18 @@ def global_auto_save_all_workspaces():
                 except Exception as e:
                     print(f"Warning: Could not reset UI colors for WS-{workspace_id}: {e}")
 
-            # Clear workspace-specific pending rows
+            # Clear workspace-specific pending rows (only for tables that were processed)
             if hasattr(config, "PENDING_ROWS"):
-                # Filter out rows that belong to this workspace
+                # Filter out rows that belong to this workspace's processed tables
                 remaining_rows = []
-                workspace_table_names = {physical_name for _, _, physical_name, _ in tables}
+                processed_table_names = {physical_name for _, _, physical_name, _ in tables_with_memory_data}
                 
                 for ptbl, row_dict in config.PENDING_ROWS:
-                    if ptbl not in workspace_table_names:
+                    if ptbl not in processed_table_names:
                         remaining_rows.append((ptbl, row_dict))
                 
                 config.PENDING_ROWS = remaining_rows
-                print(f"✅ [WS-{workspace_id}] Cleared pending rows")
+                print(f"✅ [WS-{workspace_id}] Cleared pending rows for processed tables")
 
             print(f"✅ [WS-{workspace_id}] Workspace save completed")
 

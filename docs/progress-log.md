@@ -3,7 +3,7 @@ To show the yellow color in the first column of the row which is being editted u
 
 Then for setting the color of the particular row only we get the correct row widgets using row_id instead of grid_info. Then after saving the changes we just changed the color back to normal in the auto_save_pending_rows function
 
--------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
 
 7/8/25
 changed the configs path to make the auto save common for each and every workspace as it was taking the timer different for different workspaces so just to modify that we just remove the dependency over the workspace id.
@@ -12,7 +12,7 @@ made a variable table_ui_memory and saved the table in that, then made the chang
 
 still right now multiple workspaces might not be tackled at the same time i have to look into this issue for a single workspace everything is working fine
 
--------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
 
 8/8/25
 today i made the modification to store all the data after reading from the ui to implement this i declared the global variables global_auto_save_job_id, global_auto_save_active_workspaces, and master_window_ref initially they are empty or none
@@ -28,7 +28,7 @@ then we have made the certain change in the ui for the edit thing where yellow c
 
 made the ui of the product page of the solar website
 
--------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
 
 11/8/25
 today i have tested multiple scenerios like took large number of table enteries in a particulat table and then made changes in the rows of that table then i spotted some bugs while testing like multiple workspace data was not being detected its been working for the first workspace opened only so to combat this scenerio we have made the global saving and timer thing
@@ -38,3 +38,14 @@ changes the function update_pending_count and then removed the function auto_sav
 now the only issue which i am seeing still presist in the system is that if we have multiple tables in the workspace the table which are opened only those table data is being there in the storage so the once whose ui is not opened yet but that table has data that tables data will become null as its i is not open in the storage we have null data for this table and thus according to our algo we will delete the table and then insert the new table which will be empty in this case
 
 working on the product page of the solar website
+
+---------------------------------------------------------------------------------------
+
+12/8/25
+I was on leave
+
+---------------------------------------------------------------------------------------
+
+13/8/25
+todays aim is to remove the error from the strategy manager and complete the product page of the solar website 
+
